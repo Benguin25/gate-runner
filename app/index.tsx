@@ -1,13 +1,6 @@
 import React from 'react';
-import { View } from 'react-native';
-import { GameScreen } from '../src/ui/GameScreen';
-import { ResultOverlay } from '../src/ui/Overlays';
+import { HomeScreen } from '../src/ui/HomeScreen';
 
-export default function Game() {
-  return (
-    <View style={{ flex: 1 }}>
-      <GameScreen />
-      <ResultOverlay />
-    </View>
-  );
+export default function Home() {
+  return <HomeScreen />;
 }

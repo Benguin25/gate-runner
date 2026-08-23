@@ -4,29 +4,39 @@ import type { SkCanvas } from '@shopify/react-native-skia';
 import { GameCanvas } from '../engine/GameCanvas';
 import { clamp } from '../engine/utils';
 import { CONFIG } from '../game/config';
+import { coinsForClear, startCrowdBonus, unitStrength } from '../game/economy';
 import { getLevel } from '../game/levels';
 import { createSimState, updateSim } from '../game/sim';
 import { drawGame } from '../render/drawGame';
 import { createGameFonts } from '../render/fonts';
 import { useGameStore } from '../store/gameStore';
+import { useProgressStore } from '../store/progressStore';
 
 export function GameScreen() {
   const { width } = useWindowDimensions();
   const runId = useGameStore((s) => s.runId);
-  const setPhase = useGameStore((s) => s.setPhase);
+  const win = useGameStore((s) => s.win);
+  const lose = useGameStore((s) => s.lose);
+  const levelNumber = useProgressStore((s) => s.level);
+  const upgrades = useProgressStore((s) => s.upgrades);
+  const addCoins = useProgressStore((s) => s.addCoins);
 
-  const level = useMemo(() => getLevel(1), []);
+  const level = useMemo(() => {
+    const base = getLevel(levelNumber);
+    return { ...base, startCount: base.startCount + startCrowdBonus(upgrades) };
+  }, [levelNumber, upgrades]);
+  const simOptions = useMemo(() => ({ unitStrength: unitStrength(upgrades) }), [upgrades]);
   const fonts = useMemo(() => createGameFonts(), []);
-  const sim = useRef(createSimState(level));
+  const sim = useRef(createSimState(level, simOptions));
   const steerX = useRef(0);
   const paused = useRef(false);
 
   useEffect(() => {
-    // Retry: rebuild the sim from the level definition and unpause.
-    sim.current = createSimState(level);
+    // Retry / next level: rebuild the sim from the level definition and unpause.
+    sim.current = createSimState(level, simOptions);
     steerX.current = 0;
     paused.current = false;
-  }, [runId, level]);
+  }, [runId, level, simOptions]);
 
   const onUpdate = useCallback(
     (dt: number) => {
@@ -36,12 +46,17 @@ export function GameScreen() {
       }
       s.targetX = steerX.current;
       const phase = updateSim(s, dt);
-      if (phase === 'won' || phase === 'lost') {
+      if (phase === 'won') {
         paused.current = true;
-        setPhase(phase);
+        const coins = coinsForClear(s.boss.count, s.count, upgrades);
+        addCoins(coins);
+        win(coins);
+      } else if (phase === 'lost') {
+        paused.current = true;
+        lose();
       }
     },
-    [setPhase]
+    [win, lose, addCoins, upgrades]
   );
 
   const onRender = useCallback(

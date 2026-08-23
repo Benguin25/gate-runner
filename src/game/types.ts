@@ -64,6 +64,8 @@ export interface SimState {
   gates: GateState[];
   enemies: EnemyState[];
   boss: { z: number; count: number; knockT: number };
+  /** Boss-fight multiplier per unit (strength upgrade). */
+  unitStrength: number;
   drainAcc: number;
   units: UnitVis[];
   unitsActive: number;
