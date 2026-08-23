@@ -4,7 +4,12 @@ import type { LevelDef, SimPhase, SimState } from './types';
 import { clamp } from '../engine/utils';
 import { slotX, slotY } from '../engine/formation';
 
-export function createSimState(level: LevelDef): SimState {
+export interface SimOptions {
+  /** Boss-fight multiplier per unit (strength upgrade). 1 = base. */
+  unitStrength?: number;
+}
+
+export function createSimState(level: LevelDef, options?: SimOptions): SimState {
   const units: SimState['units'] = [];
   for (let i = 0; i < CONFIG.crowd.renderCap; i++) {
     units.push({ x: 0, y: 0 });
@@ -26,6 +31,7 @@ export function createSimState(level: LevelDef): SimState {
     gates: level.gatePairs.map((g) => ({ ...g, used: false, hitSide: 0, flash: 0 })),
     enemies: level.enemies.map((e) => ({ ...e, alive: true })),
     boss: { z: level.boss.z, count: level.boss.count, knockT: 0 },
+    unitStrength: options?.unitStrength ?? 1,
     drainAcc: 0,
     units,
     unitsActive: active,
@@ -90,7 +96,7 @@ export function updateSim(s: SimState, dt: number): SimPhase {
   }
 
   if (s.phase === 'boss') {
-    if (s.count > s.boss.count) {
+    if (s.count * s.unitStrength > s.boss.count) {
       // Big enough: the boss tumbles off, then the level clears.
       s.boss.knockT += dt / CONFIG.boss.knockbackSec;
       if (s.boss.knockT >= 1) {
