@@ -2,18 +2,23 @@ import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { PanResponder, StyleSheet, View, useWindowDimensions } from 'react-native';
 import type { SkCanvas } from '@shopify/react-native-skia';
 import { GameCanvas } from '../engine/GameCanvas';
+import { playHaptic } from '../engine/haptics';
+import { initSfx, playSfx } from '../engine/sfx';
 import { clamp } from '../engine/utils';
 import { CONFIG } from '../game/config';
 import { coinsForClear, startCrowdBonus, unitStrength } from '../game/economy';
 import { getLevel } from '../game/levels';
 import { createSimState, updateSim } from '../game/sim';
+import type { SimEvent } from '../game/types';
+import { createRenderCache } from '../render/cache';
 import { drawGame } from '../render/drawGame';
+import { applyFxEvent, createFxState, fxTimeScale, updateFx } from '../render/fx';
 import { createGameFonts } from '../render/fonts';
 import { useGameStore } from '../store/gameStore';
 import { useProgressStore } from '../store/progressStore';
 
 export function GameScreen() {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const runId = useGameStore((s) => s.runId);
   const win = useGameStore((s) => s.win);
   const lose = useGameStore((s) => s.lose);
@@ -27,43 +32,97 @@ export function GameScreen() {
   }, [levelNumber, upgrades]);
   const simOptions = useMemo(() => ({ unitStrength: unitStrength(upgrades) }), [upgrades]);
   const fonts = useMemo(() => createGameFonts(), []);
+  const cache = useMemo(() => createRenderCache(), []);
   const sim = useRef(createSimState(level, simOptions));
+  const fx = useRef(createFxState());
   const steerX = useRef(0);
   const paused = useRef(false);
 
   useEffect(() => {
-    // Retry / next level: rebuild the sim from the level definition and unpause.
+    initSfx();
+  }, []);
+
+  useEffect(() => {
+    // Retry / next level: rebuild sim and juice state, unpause.
     sim.current = createSimState(level, simOptions);
+    fx.current = createFxState();
     steerX.current = 0;
     paused.current = false;
   }, [runId, level, simOptions]);
 
+  const onSimEvent = useCallback(
+    (ev: SimEvent) => {
+      const s = sim.current;
+      applyFxEvent(fx.current, ev, s, width, height);
+      playHaptic(ev.kind);
+      switch (ev.kind) {
+        case 'gateGood':
+          playSfx('pop');
+          break;
+        case 'gateBad':
+          playSfx('deflate');
+          break;
+        case 'enemyHit':
+          playSfx('hit');
+          break;
+        case 'bossHit':
+          playSfx('boss');
+          break;
+        case 'won':
+          playSfx('win');
+          playSfx('coin');
+          break;
+        case 'lost':
+          playSfx('lose');
+          break;
+      }
+    },
+    [width, height]
+  );
+
   const onUpdate = useCallback(
     (dt: number) => {
       const s = sim.current;
-      if (s.phase === 'won' || s.phase === 'lost') {
-        return;
+      const f = fx.current;
+      if (s.phase !== 'won' && s.phase !== 'lost') {
+        s.targetX = steerX.current;
+        // Boss-hit slow-mo scales the sim step; the juice clocks below run on
+        // real time so the slow-mo itself lasts its configured wall-clock span.
+        updateSim(s, dt * fxTimeScale(f));
+        for (let i = 0; i < s.events.length; i++) {
+          onSimEvent(s.events[i]);
+        }
+        s.events.length = 0;
       }
-      s.targetX = steerX.current;
-      const phase = updateSim(s, dt);
-      if (phase === 'won') {
-        paused.current = true;
-        const coins = coinsForClear(s.boss.count, s.count, upgrades);
-        addCoins(coins);
-        win(coins);
-      } else if (phase === 'lost') {
-        paused.current = true;
-        lose();
+      updateFx(f, dt, s);
+
+      // Let the celebration/defeat animation play before the result overlay.
+      if ((s.phase === 'won' || s.phase === 'lost') && !f.resultShown) {
+        const delay =
+          s.phase === 'won'
+            ? CONFIG.juice.winOverlayDelaySec
+            : CONFIG.juice.loseOverlayDelaySec;
+        if (f.phaseTime >= delay) {
+          f.resultShown = true;
+          paused.current = true;
+          if (s.phase === 'won') {
+            const coins = coinsForClear(s.boss.count, s.count, upgrades);
+            addCoins(coins);
+            win(coins);
+          } else {
+            lose();
+          }
+        }
       }
     },
-    [win, lose, addCoins, upgrades]
+    [onSimEvent, win, lose, addCoins, upgrades]
   );
 
   const onRender = useCallback(
     (canvas: SkCanvas, w: number, h: number, alpha: number) => {
-      drawGame(canvas, sim.current, w, h, alpha, fonts);
+      drawGame(canvas, sim.current, fx.current, w, h, alpha, fonts, cache);
     },
-    [fonts]
+    [fonts, cache]
   );
 
   // Drag steering: horizontal finger travel moves the crowd centre across the

@@ -7,6 +7,9 @@ export const CONFIG = {
     // Cap catch-up steps after a long frame so we never spiral.
     maxStepsPerFrame: 5,
     maxFrameDeltaSec: 0.1,
+    // Juice events queued by the sim are dropped past this many per step, so
+    // headless callers that never drain them (bot, playouts) stay bounded.
+    maxQueuedEvents: 16,
   },
 
   lane: {
@@ -183,6 +186,74 @@ export const CONFIG = {
     // reach high lose rates anyway) and saves the squeeze for the end.
     targetLoseRateExponent: 1.4,
     bossMin: 5,
+  },
+
+  juice: {
+    // Boss hit: brief slow motion plus a screen shake as the knockback starts.
+    slowmoScale: 0.3,
+    slowmoSec: 0.4,
+    shakeAmplitudePx: 6,
+    shakeSec: 0.45,
+    // Shake oscillator frequencies (rad/sec); two incommensurate axes so the
+    // offset never settles into a visible loop.
+    shakeFreqX: 55,
+    shakeFreqY: 47,
+
+    // Full-screen red flash on a bad gate.
+    redFlashAlpha: 0.3,
+    redFlashSec: 0.35,
+
+    // Confetti of small squares in the gate colour on every gate pass.
+    confettiCount: 22,
+    confettiSizePx: 5,
+    confettiSpeedMinPx: 140,
+    confettiSpeedMaxPx: 360,
+    // Extra upward kick so bursts fountain instead of just radiating.
+    confettiUpKickPx: 150,
+    confettiGravityPx: 780,
+    confettiSpinMaxRad: 10,
+    confettiLifeSec: 0.85,
+
+    // Units popping out of the blob on a bad gate (and on enemy hits).
+    popUnitsMax: 10,
+    popUnitsEnemyMax: 6,
+    popUnitSpeedMinPx: 130,
+    popUnitSpeedMaxPx: 300,
+    popUnitUpKickPx: 190,
+    popUnitGravityPx: 900,
+    popUnitLifeSec: 0.7,
+
+    // Win: coins fountain out of the crowd while units do a staggered jump.
+    coinCount: 26,
+    coinRadiusPx: 5,
+    coinSpeedMinPx: 90,
+    coinSpeedMaxPx: 260,
+    coinUpKickPx: 420,
+    coinGravityPx: 820,
+    coinLifeSec: 1.2,
+    winJumpStaggerSec: 0.015,
+    winJumpHeightPx: 12,
+    winJumpSec: 0.34,
+    // How long the celebration/defeat plays before the result overlay.
+    winOverlayDelaySec: 1.5,
+
+    // Lose: units fall over in a wave spreading from the blob centre.
+    loseWaveSpeedPx: 220,
+    loseFallSec: 0.4,
+    loseOverlayDelaySec: 1.3,
+
+    // Count label pops on every gate hit ("number flashes").
+    labelPopScale: 1.45,
+    labelPopSec: 0.28,
+
+    // Crowd blob squishes narrower when steering fast. Squish amount per
+    // normalized-lane-x/sec of crowd speed, its cap, and the smoothing rate.
+    squishPerVel: 0.1,
+    squishMax: 0.32,
+    squishLerp: 9,
+
+    // Particle pool size shared by confetti, coins and popped units.
+    maxParticles: 120,
   },
 
   economy: {
