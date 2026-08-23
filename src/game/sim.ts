@@ -1,6 +1,6 @@
 import { CONFIG } from './config';
-import { applyOp } from './ops';
-import type { LevelDef, SimPhase, SimState } from './types';
+import { applyOp, isGoodOp } from './ops';
+import type { LevelDef, SimEventKind, SimPhase, SimState } from './types';
 import { clamp } from '../engine/utils';
 import { slotX, slotY } from '../engine/formation';
 
@@ -35,7 +35,16 @@ export function createSimState(level: LevelDef, options?: SimOptions): SimState 
     drainAcc: 0,
     units,
     unitsActive: active,
+    events: [],
   };
+}
+
+// Queue a juice event. Capped so headless callers that never drain the queue
+// (bot, boss playouts) cannot grow it without bound.
+function emit(s: SimState, kind: SimEventKind): void {
+  if (s.events.length < CONFIG.engine.maxQueuedEvents) {
+    s.events.push({ kind });
+  }
 }
 
 /** One fixed 60hz simulation step. Mutates the state in place; returns the phase after the step. */
@@ -59,10 +68,12 @@ export function updateSim(s: SimState, dt: number): SimPhase {
       const gate = s.gates[i];
       if (!gate.used && s.prevDistance < gate.z && s.distance >= gate.z) {
         const side = s.crowdX >= 0 ? 1 : -1;
-        s.count = applyOp(s.count, side > 0 ? gate.right : gate.left);
+        const op = side > 0 ? gate.right : gate.left;
+        s.count = applyOp(s.count, op);
         gate.used = true;
         gate.hitSide = side;
         gate.flash = CONFIG.gates.hitFlashSec;
+        emit(s, isGoodOp(op) ? 'gateGood' : 'gateBad');
       }
       if (gate.flash > 0) {
         gate.flash = Math.max(0, gate.flash - dt);
@@ -80,11 +91,13 @@ export function updateSim(s: SimState, dt: number): SimPhase {
       ) {
         e.alive = false;
         s.count = Math.max(0, s.count - e.count);
+        emit(s, 'enemyHit');
       }
     }
 
     if (s.count <= 0) {
       s.phase = 'lost';
+      emit(s, 'lost');
       return s.phase;
     }
 
@@ -98,10 +111,14 @@ export function updateSim(s: SimState, dt: number): SimPhase {
   if (s.phase === 'boss') {
     if (s.count * s.unitStrength > s.boss.count) {
       // Big enough: the boss tumbles off, then the level clears.
+      if (s.boss.knockT === 0) {
+        emit(s, 'bossHit');
+      }
       s.boss.knockT += dt / CONFIG.boss.knockbackSec;
       if (s.boss.knockT >= 1) {
         s.boss.knockT = 1;
         s.phase = 'won';
+        emit(s, 'won');
       }
     } else {
       // Too small: the crowd grinds down to zero.
@@ -113,6 +130,7 @@ export function updateSim(s: SimState, dt: number): SimPhase {
       }
       if (s.count <= 0) {
         s.phase = 'lost';
+        emit(s, 'lost');
       }
     }
   }

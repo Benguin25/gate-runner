@@ -32,6 +32,23 @@ export interface LevelDef {
 
 export type SimPhase = 'running' | 'boss' | 'won' | 'lost';
 
+/**
+ * One-shot moments the sim announces for juice (sound, haptics, particles).
+ * Queued on SimState.events; interactive callers drain the queue every frame,
+ * headless callers (bot, boss playouts) can ignore it — it is length-capped.
+ */
+export type SimEventKind =
+  | 'gateGood'
+  | 'gateBad'
+  | 'enemyHit'
+  | 'bossHit'
+  | 'won'
+  | 'lost';
+
+export interface SimEvent {
+  kind: SimEventKind;
+}
+
 export interface GateState extends GatePairDef {
   used: boolean;
   /** -1 = left hit, 1 = right hit, 0 = not hit. */
@@ -69,4 +86,6 @@ export interface SimState {
   drainAcc: number;
   units: UnitVis[];
   unitsActive: number;
+  /** Queued juice events since the caller last cleared the array. */
+  events: SimEvent[];
 }

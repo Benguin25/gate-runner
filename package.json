@@ -30,7 +30,9 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "bot": "tsx scripts/bot.ts"
+    "bot": "tsx scripts/bot.ts",
+    "sfx": "tsx scripts/gensfx.ts",
+    "profile": "tsx --tsconfig scripts/tsconfig.profile.json scripts/profile.ts"
   },
   "private": true
 }

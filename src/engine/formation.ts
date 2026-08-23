@@ -4,11 +4,29 @@ import { CONFIG } from '../game/config';
 
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
+// Slots up to the render cap are precomputed at unit spacing: slot lookups run
+// per unit per fixed step (and again for enemy clumps in the render), so the
+// cos/sin/sqrt per call showed up in the 300-unit profile.
+const TABLE_SIZE = CONFIG.crowd.renderCap;
+const tableX = new Float32Array(TABLE_SIZE);
+const tableY = new Float32Array(TABLE_SIZE);
+for (let i = 0; i < TABLE_SIZE; i++) {
+  const r = Math.sqrt(i + 0.5);
+  tableX[i] = Math.cos(i * GOLDEN_ANGLE) * r;
+  tableY[i] = Math.sin(i * GOLDEN_ANGLE) * r * CONFIG.crowd.ellipseFlatten;
+}
+
 export function slotX(i: number, spacingPx: number): number {
+  if (i < TABLE_SIZE) {
+    return tableX[i] * spacingPx;
+  }
   return Math.cos(i * GOLDEN_ANGLE) * spacingPx * Math.sqrt(i + 0.5);
 }
 
 export function slotY(i: number, spacingPx: number): number {
+  if (i < TABLE_SIZE) {
+    return tableY[i] * spacingPx;
+  }
   return (
     Math.sin(i * GOLDEN_ANGLE) *
     spacingPx *
