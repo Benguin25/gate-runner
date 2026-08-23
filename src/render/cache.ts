@@ -28,7 +28,8 @@ export class RenderCache {
   private paints = new Map<ColorName, SkPaint>();
   private lane: LaneGeometry | null = null;
   private textWidths = new Map<SkFont, Map<string, number>>();
-  private crown: SkPath | null = null;
+  private slots: SkPath | null = null;
+  private scratch: SkPath | null = null;
   /** Stroke paint for the lane edges. */
   readonly edgePaint: SkPaint;
 
@@ -86,28 +87,40 @@ export class RenderCache {
   }
 
   /**
-   * The boss's crown (base band plus three spikes) in boss-local units;
-   * its geometry only depends on config, so it is built once.
+   * The storm drain's slot bars (dark horizontal grate openings) in
+   * drain-local units; geometry only depends on config, so it is built once.
    */
-  bossCrownPath(): SkPath {
-    if (this.crown) {
-      return this.crown;
+  drainSlotsPath(): SkPath {
+    if (this.slots) {
+      return this.slots;
     }
     const B = CONFIG.boss;
-    const R = B.bodyRadiusPx;
-    const hr = R * B.headRadiusFrac;
-    const crown = Skia.Path.Make();
-    const baseY = -R * 0.95 - hr * 0.8;
-    crown.addRect(Skia.XYWHRect(-hr * 0.7, baseY - hr * 0.2, hr * 1.4, hr * 0.25));
-    for (let k = -1; k <= 1; k++) {
-      const sx = k * hr * 0.47;
-      crown.moveTo(sx - hr * 0.23, baseY - hr * 0.15);
-      crown.lineTo(sx + hr * 0.23, baseY - hr * 0.15);
-      crown.lineTo(sx, baseY - hr * 0.85);
-      crown.close();
+    const R = B.bodyRadiusPx * (1 - B.rimFrac);
+    const slots = Skia.Path.Make();
+    const slotH = B.bodyRadiusPx * B.slotHeightFrac;
+    for (let k = 0; k < B.slotCount; k++) {
+      // Bars spread evenly across the grate, shorter toward the edges.
+      const fy = (k + 0.5) / B.slotCount - 0.5;
+      const y = fy * 2 * R * 0.8;
+      const halfW = Math.sqrt(Math.max(0.15, 1 - fy * fy * 2.6)) * R * B.slotWidthFrac * 0.5;
+      slots.addRRect(
+        Skia.RRectXY(Skia.XYWHRect(-halfW, y - slotH / 2, halfW * 2, slotH), slotH / 2, slotH / 2)
+      );
     }
-    this.crown = crown;
-    return crown;
+    this.slots = slots;
+    return slots;
+  }
+
+  /**
+   * A shared scratch path, reset on every call. Used for per-frame batched
+   * geometry (all the duckling beaks) so the hot loop makes no allocations.
+   */
+  scratchPath(): SkPath {
+    if (!this.scratch) {
+      this.scratch = Skia.Path.Make();
+    }
+    this.scratch.reset();
+    return this.scratch;
   }
 
   /** Memoized text width — labels repeat for many frames between changes. */

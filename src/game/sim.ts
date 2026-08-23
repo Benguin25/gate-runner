@@ -1,5 +1,6 @@
 import { CONFIG } from './config';
 import { applyOp, isGoodOp } from './ops';
+import { mulberry32 } from './rng';
 import type { LevelDef, SimEventKind, SimPhase, SimState } from './types';
 import { clamp } from '../engine/utils';
 import { slotX, slotY } from '../engine/formation';
@@ -7,6 +8,11 @@ import { slotX, slotY } from '../engine/formation';
 export interface SimOptions {
   /** Boss-fight multiplier per unit (strength upgrade). 1 = base. */
   unitStrength?: number;
+  /**
+   * Seed for this attempt's gamble rolls. Defaults to the level seed, so a
+   * given (level, seed) attempt is fully deterministic — the bot relies on it.
+   */
+  gambleSeed?: number;
 }
 
 export function createSimState(level: LevelDef, options?: SimOptions): SimState {
@@ -32,6 +38,7 @@ export function createSimState(level: LevelDef, options?: SimOptions): SimState 
     enemies: level.enemies.map((e) => ({ ...e, alive: true })),
     boss: { z: level.boss.z, count: level.boss.count, knockT: 0 },
     unitStrength: options?.unitStrength ?? 1,
+    gambleRng: mulberry32(options?.gambleSeed ?? level.seed),
     drainAcc: 0,
     units,
     unitsActive: active,
@@ -63,17 +70,28 @@ export function updateSim(s: SimState, dt: number): SimPhase {
     s.crowdX += (target - s.crowdX) * Math.min(1, CONFIG.run.steerLerp * dt);
 
     // Gate walls: crossing one applies the operator of the side the crowd
-    // centre is on — you always pass through exactly one of the pair.
+    // centre is on — you always pass through exactly one of the row. A row
+    // with a middle gamble gate splits into thirds; hitting the middle rolls
+    // 50/50 between xN and ÷N from the attempt-seeded RNG.
     for (let i = 0; i < s.gates.length; i++) {
       const gate = s.gates[i];
       if (!gate.used && s.prevDistance < gate.z && s.distance >= gate.z) {
-        const side = s.crowdX >= 0 ? 1 : -1;
-        const op = side > 0 ? gate.right : gate.left;
-        s.count = applyOp(s.count, op);
+        const third = CONFIG.gates.trioThirdX;
+        const side: -1 | 0 | 1 =
+          gate.middle && Math.abs(s.crowdX) < third ? 0 : s.crowdX >= 0 ? 1 : -1;
         gate.used = true;
         gate.hitSide = side;
         gate.flash = CONFIG.gates.hitFlashSec;
-        emit(s, isGoodOp(op) ? 'gateGood' : 'gateBad');
+        if (side === 0 && gate.middle) {
+          const won = s.gambleRng() < 0.5;
+          const op = { kind: won ? ('mul' as const) : ('div' as const), value: gate.middle.value };
+          s.count = applyOp(s.count, op);
+          emit(s, won ? 'gambleWin' : 'gambleLose');
+        } else {
+          const op = side > 0 ? gate.right : gate.left;
+          s.count = applyOp(s.count, op);
+          emit(s, isGoodOp(op) ? 'gateGood' : 'gateBad');
+        }
       }
       if (gate.flash > 0) {
         gate.flash = Math.max(0, gate.flash - dt);
@@ -110,7 +128,7 @@ export function updateSim(s: SimState, dt: number): SimPhase {
 
   if (s.phase === 'boss') {
     if (s.count * s.unitStrength > s.boss.count) {
-      // Big enough: the boss tumbles off, then the level clears.
+      // Big enough: mama caps the drain, then the level clears.
       if (s.boss.knockT === 0) {
         emit(s, 'bossHit');
       }
@@ -121,12 +139,13 @@ export function updateSim(s: SimState, dt: number): SimPhase {
         emit(s, 'won');
       }
     } else {
-      // Too small: the crowd grinds down to zero.
+      // Too small: the ducklings get pulled into the drain one by one.
       s.drainAcc += CONFIG.boss.drainPerSec * dt;
       const whole = Math.floor(s.drainAcc);
       if (whole > 0) {
         s.drainAcc -= whole;
         s.count = Math.max(0, s.count - whole);
+        emit(s, 'drained');
       }
       if (s.count <= 0) {
         s.phase = 'lost';

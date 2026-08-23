@@ -14,6 +14,8 @@ export const ParticleKind = {
   Confetti: 0,
   Coin: 1,
   Unit: 2,
+  /** A duckling being pulled into the storm drain: no gravity, shrinks away. */
+  Drained: 3,
 } as const;
 export type ParticleKind = (typeof ParticleKind)[keyof typeof ParticleKind];
 
@@ -38,8 +40,18 @@ export interface FxState {
   shakeT: number;
   /** Seconds of bad-gate red flash remaining. */
   flashT: number;
+  /** Seconds of gamble-gate purple flash remaining. */
+  gambleFlashT: number;
+  /** Seconds of gamble slot-machine spin remaining; label ticks while > 0. */
+  gambleSpinT: number;
+  /** Rolled outcome of the spinning gamble (revealed when the spin ends). */
+  gambleGood: boolean;
+  /** Set for one frame when the spin lands, so the caller can play sounds. */
+  gambleLanded: boolean;
   /** Seconds of count-label pop remaining. */
   labelPopT: number;
+  /** Peak scale of the current label pop (bigger when a gamble lands). */
+  labelPopAmp: number;
   /** Current blob squish from fast steering, 0..squishMax. */
   squish: number;
   /** Seconds since the sim reached won/lost; drives jump/fall animations. */
@@ -71,7 +83,12 @@ export function createFxState(): FxState {
     slowmoT: 0,
     shakeT: 0,
     flashT: 0,
+    gambleFlashT: 0,
+    gambleSpinT: 0,
+    gambleGood: false,
+    gambleLanded: false,
     labelPopT: 0,
+    labelPopAmp: CONFIG.juice.labelPopScale,
     squish: 0,
     phaseTime: 0,
     resultShown: false,
@@ -145,6 +162,31 @@ function popUnits(fx: FxState, n: number, x: number, y: number): void {
   }
 }
 
+/** Ducklings pulled from the flock into the drain: straight homing flights. */
+function pullDucklings(fx: FxState, n: number, s: SimState, w: number, h: number): void {
+  const J = CONFIG.juice;
+  const from = crowdScreenPos(s, w, h);
+  const drain = projectDepth(s.boss.z - s.distance, w, h);
+  for (let i = 0; i < n; i++) {
+    const p = spawn(fx);
+    if (!p) {
+      return;
+    }
+    const life = J.drainPullSec * rand(0.8, 1.1);
+    const x = from.x + rand(-24, 24);
+    const y = from.y + rand(-10, 10);
+    p.kind = ParticleKind.Drained;
+    p.x = x;
+    p.y = y;
+    p.vx = (w / 2 - x) / life;
+    p.vy = (drain.y - y) / life;
+    p.rot = 0;
+    p.vrot = rand(-8, 8);
+    p.life0 = life;
+    p.life = life;
+  }
+}
+
 function fountainCoins(fx: FxState, x: number, y: number): void {
   const J = CONFIG.juice;
   for (let i = 0; i < J.coinCount; i++) {
@@ -175,16 +217,30 @@ export function applyFxEvent(fx: FxState, ev: SimEvent, s: SimState, w: number, 
     case 'gateGood':
       burstConfetti(fx, true, at.x, at.y);
       fx.labelPopT = J.labelPopSec;
+      fx.labelPopAmp = J.labelPopScale;
       break;
     case 'gateBad':
       burstConfetti(fx, false, at.x, at.y);
       popUnits(fx, J.popUnitsMax, at.x, at.y);
       fx.flashT = J.redFlashSec;
       fx.labelPopT = J.labelPopSec;
+      fx.labelPopAmp = J.labelPopScale;
+      break;
+    case 'gambleWin':
+    case 'gambleLose':
+      // The roll is decided, but the reveal waits: purple flash now, the
+      // label spins slot-machine numbers, and updateFx lands the result.
+      fx.gambleGood = ev.kind === 'gambleWin';
+      fx.gambleFlashT = J.gambleFlashSec;
+      fx.gambleSpinT = J.gambleSpinSec;
       break;
     case 'enemyHit':
       popUnits(fx, J.popUnitsEnemyMax, at.x, at.y);
       fx.labelPopT = J.labelPopSec;
+      fx.labelPopAmp = J.labelPopScale;
+      break;
+    case 'drained':
+      pullDucklings(fx, J.drainPullMaxPerTick, s, w, h);
       break;
     case 'bossHit':
       fx.slowmoT = J.slowmoSec;
@@ -203,14 +259,33 @@ export function applyFxEvent(fx: FxState, ev: SimEvent, s: SimState, w: number, 
  * decays at wall-clock speed; particles advance on scaled time so they share
  * the sim's slow motion.
  */
-export function updateFx(fx: FxState, dt: number, s: SimState): void {
+export function updateFx(fx: FxState, dt: number, s: SimState, w: number, h: number): void {
   const J = CONFIG.juice;
   const scaled = dt * fxTimeScale(fx);
 
   fx.slowmoT = Math.max(0, fx.slowmoT - dt);
   fx.shakeT = Math.max(0, fx.shakeT - dt);
   fx.flashT = Math.max(0, fx.flashT - dt);
+  fx.gambleFlashT = Math.max(0, fx.gambleFlashT - dt);
   fx.labelPopT = Math.max(0, fx.labelPopT - dt);
+
+  // Gamble slot-machine spin: when it runs out, the number lands — big pop,
+  // outcome-coloured burst, and a one-frame flag so the caller plays sounds.
+  fx.gambleLanded = false;
+  if (fx.gambleSpinT > 0) {
+    fx.gambleSpinT = Math.max(0, fx.gambleSpinT - dt);
+    if (fx.gambleSpinT === 0) {
+      fx.gambleLanded = true;
+      fx.labelPopT = J.labelPopSec;
+      fx.labelPopAmp = J.gambleLandPopScale;
+      const at = crowdScreenPos(s, w, h);
+      burstConfetti(fx, fx.gambleGood, at.x, at.y);
+      if (!fx.gambleGood) {
+        fx.flashT = J.redFlashSec;
+        popUnits(fx, J.popUnitsMax, at.x, at.y);
+      }
+    }
+  }
 
   // Steering squish follows the crowd centre's lateral speed.
   const vel = Math.abs(s.crowdX - s.prevCrowdX) / CONFIG.engine.fixedStep;
@@ -240,7 +315,9 @@ export function updateFx(fx: FxState, dt: number, s: SimState): void {
         ? J.confettiGravityPx
         : p.kind === ParticleKind.Coin
           ? J.coinGravityPx
-          : J.popUnitGravityPx;
+          : p.kind === ParticleKind.Drained
+            ? 0 // Homing straight into the drain; gravity would miss it.
+            : J.popUnitGravityPx;
     p.vy += g * scaled;
     p.x += p.vx * scaled;
     p.y += p.vy * scaled;

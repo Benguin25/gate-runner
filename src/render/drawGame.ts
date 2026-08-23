@@ -1,4 +1,4 @@
-import type { SkCanvas, SkFont, SkPaint } from '@shopify/react-native-skia';
+import type { SkCanvas, SkFont, SkPaint, SkPath } from '@shopify/react-native-skia';
 import { Skia } from '@shopify/react-native-skia';
 import { CONFIG } from '../game/config';
 import { isGoodOp, opLabel } from '../game/ops';
@@ -43,7 +43,7 @@ export function drawGame(
   }
 
   drawLane(canvas, w, h, dist, cache);
-  drawGates(canvas, s, w, h, cx, dist, cache, fonts.gate);
+  drawGates(canvas, s, w, h, cx, dist, cache, fonts.gate, fonts.small);
   drawEnemies(canvas, s, w, h, cx, dist, cache, fonts.small);
   drawBoss(canvas, s, w, h, cx, dist, cache, fonts.boss);
   drawCrowd(canvas, s, fx, w, h, cx, crowdX, cache, fonts.label);
@@ -58,6 +58,15 @@ export function drawGame(
     const J = CONFIG.juice;
     const flash = cache.paint('badGate');
     flash.setAlphaf(J.redFlashAlpha * (fx.flashT / J.redFlashSec));
+    canvas.drawRect(Skia.XYWHRect(0, 0, w, h), flash);
+    flash.setAlphaf(1);
+  }
+
+  // Gamble-gate purple flash, same treatment.
+  if (fx.gambleFlashT > 0) {
+    const J = CONFIG.juice;
+    const flash = cache.paint('gambleGate');
+    flash.setAlphaf(J.gambleFlashAlpha * (fx.gambleFlashT / J.gambleFlashSec));
     canvas.drawRect(Skia.XYWHRect(0, 0, w, h), flash);
     flash.setAlphaf(1);
   }
@@ -102,42 +111,74 @@ function drawGates(
   cx: number,
   dist: number,
   cache: RenderCache,
-  font: SkFont
+  font: SkFont,
+  smallFont: SkFont
 ): void {
   const G = CONFIG.gates;
   const text = cache.paint('gateText');
+  // Lookahead: the current row draws normally, the row after it draws dimmed
+  // (smaller with a readable text floor), and rows beyond that stay hidden —
+  // the read is always exactly two rows deep.
+  let currentIdx = s.gates.length;
+  for (let i = 0; i < s.gates.length; i++) {
+    if (!s.gates[i].used) {
+      currentIdx = i;
+      break;
+    }
+  }
   // Far to near, so closer walls draw on top.
   for (let i = s.gates.length - 1; i >= 0; i--) {
     const gate = s.gates[i];
+    if (!gate.used && i > currentIdx + 1) {
+      continue;
+    }
     const dz = gate.z - dist;
     if (isCulled(dz)) {
       continue;
     }
     const proj = projectDepth(dz, w, h);
+    const lookahead = !gate.used && i === currentIdx + 1;
+    const dim = lookahead ? G.lookaheadAlphaFrac : 1;
+    const textScale = lookahead
+      ? Math.max(proj.scale, G.lookaheadTextMinScale)
+      : proj.scale;
     const wallH = G.heightPx * proj.scale;
     const r = G.cornerRadiusPx * proj.scale;
+    // A row with a middle gamble gate is a trio of thirds, otherwise halves.
+    const cols = gate.middle ? 3 : 2;
+    const colW = (proj.halfW * 2) / cols;
 
-    for (let side = -1; side <= 1; side += 2) {
+    for (let c = 0; c < cols; c++) {
+      const side = cols === 3 ? c - 1 : c === 0 ? -1 : 1;
+      const gamble = cols === 3 && side === 0 ? gate.middle : undefined;
       const op = side < 0 ? gate.left : gate.right;
-      const x0 = side < 0 ? cx - proj.halfW : cx;
-      let a: number = gate.used ? G.passedOpacity : G.opacity;
+      const x0 = cx - proj.halfW + c * colW;
+      let a: number = (gate.used ? G.passedOpacity : G.opacity) * dim;
       if (gate.used && gate.hitSide === side && gate.flash > 0) {
         // The chosen gate flashes bright as the number pops.
         a = lerp(G.passedOpacity, 1, gate.flash / G.hitFlashSec);
       }
-      const wall = cache.paint(isGoodOp(op) ? 'goodGate' : 'badGate');
+      const wall = cache.paint(
+        gamble ? 'gambleGate' : isGoodOp(op) ? 'goodGate' : 'badGate'
+      );
       wall.setAlphaf(a);
       canvas.drawRRect(
-        Skia.RRectXY(Skia.XYWHRect(x0, proj.y - wallH, proj.halfW, wallH), r, r),
+        Skia.RRectXY(Skia.XYWHRect(x0, proj.y - wallH, colW, wallH), r, r),
         wall
       );
       wall.setAlphaf(1);
 
       text.setAlphaf(clamp(a + 0.25, 0, 1));
       canvas.save();
-      canvas.translate(x0 + proj.halfW / 2, proj.y - wallH / 2);
-      canvas.scale(proj.scale, proj.scale);
-      drawCenteredText(canvas, opLabel(op), 0, G.textFontSize * 0.36, font, text, cache);
+      canvas.translate(x0 + colW / 2, proj.y - wallH / 2);
+      canvas.scale(textScale, textScale);
+      if (gamble) {
+        // Both possible outcomes stacked: the gamble shows what it offers.
+        drawCenteredText(canvas, `x${gamble.value}`, 0, -G.textFontSize * 0.1, smallFont, text, cache);
+        drawCenteredText(canvas, `÷${gamble.value}`, 0, G.textFontSize * 0.57, smallFont, text, cache);
+      } else {
+        drawCenteredText(canvas, opLabel(op), 0, G.textFontSize * 0.36, font, text, cache);
+      }
       canvas.restore();
     }
   }
@@ -198,39 +239,37 @@ function drawBoss(
     return;
   }
   const proj = projectDepth(dz, w, h);
+  // knockT doubles as the win animation clock: mama caps the drain.
   const kt = s.boss.knockT;
-  // Knockback tumble: up, off to the side, spinning.
-  const ox = kt * w * 0.3;
-  const oy = -kt * kt * h * 0.65;
-  // Stomp bounce while grinding a losing crowd down.
+  // Suction pulse while ducklings are being pulled in.
   const losing = s.phase === 'boss' && s.count <= s.boss.count && s.count > 0;
-  const bounce = losing ? Math.abs(Math.sin(s.time * 12)) * 8 : 0;
-
-  canvas.save();
-  canvas.translate(cx + ox, proj.y + oy - bounce);
-  canvas.rotate(kt * 320, 0, 0);
-  canvas.scale(proj.scale, proj.scale);
+  const pulse = losing
+    ? 1 + Math.abs(Math.sin(s.time * Math.PI * 2 * B.pulseHz)) * B.pulseScale
+    : 1;
 
   const R = B.bodyRadiusPx;
-  const hr = R * B.headRadiusFrac;
-  const baseY = -R * 0.95 - hr * 0.8;
-  const body = cache.paint('boss');
-  canvas.drawCircle(0, 0, R, body);
-  canvas.drawCircle(0, -R * 0.95, hr, body);
-  canvas.drawPath(cache.bossCrownPath(), cache.paint('bossCrown'));
-
-  // The number over the boss's head, until the tumble carries it away.
-  if (kt < 0.2) {
-    drawShadowedText(
-      canvas,
-      `${s.boss.count}`,
-      0,
-      baseY - hr - B.numberGapPx,
-      font,
-      cache
-    );
+  canvas.save();
+  canvas.translate(cx, proj.y);
+  // The grate lies on the path: flattened by the fake perspective.
+  canvas.scale(proj.scale * pulse, proj.scale * B.drainFlatten * pulse);
+  canvas.drawCircle(0, 0, R, cache.paint('drainRim'));
+  canvas.drawCircle(0, 0, R * (1 - B.rimFrac), cache.paint('drain'));
+  canvas.drawPath(cache.drainSlotsPath(), cache.paint('drainSlot'));
+  if (kt > 0) {
+    // Win: the cover slides in from the crowd side and seats with an ease-out.
+    const slide = 1 - (1 - kt) * (1 - kt);
+    canvas.drawCircle(0, (1 - slide) * R * 3.5, R * (1 - B.rimFrac * 0.4), cache.paint('drainCap'));
   }
   canvas.restore();
+
+  // The number over the drain, until the cap covers it.
+  if (kt < 0.2) {
+    canvas.save();
+    canvas.translate(cx, proj.y - (R * B.drainFlatten + B.numberGapPx) * proj.scale);
+    canvas.scale(proj.scale, proj.scale);
+    drawShadowedText(canvas, `${s.boss.count}`, 0, 0, font, cache);
+    canvas.restore();
+  }
 }
 
 function drawCrowd(
@@ -260,24 +299,31 @@ function drawCrowd(
   const head = cache.paint('crowdHead');
   const headDist = K.unitRadiusPx * bs * 0.9;
   const headR = K.unitRadiusPx * bs * K.headRadiusFrac;
+  // All beaks batch into one shared path — one draw call, no allocations.
+  const beaks = cache.scratchPath();
+  // 2-frame waddle clock, shared by the flock; each duckling alternates phase.
+  const waddleFrame = Math.floor(s.time * K.waddleFramesPerSec);
 
   for (let i = s.unitsActive - 1; i >= 0; i--) {
     const u = s.units[i];
-    let bob = Math.sin(s.time * K.bobFrequency + i * 1.31) * K.bobAmplitudePx;
-    const px = sx + u.x * scaleX;
+    // 2-frame waddle-bob: snap between two poses with a small sideways rock.
+    const frame = (waddleFrame + i) & 1;
+    let bob = frame ? -K.bobAmplitudePx : 0;
+    const rock = (frame ? 1 : -1) * (i & 1 ? 1 : -1) * K.waddleRockPx;
+    const px = sx + u.x * scaleX + rock;
     let py = sy + u.y * scaleY;
-    // Head offset from the body centre; tips sideways as a lost unit falls.
+    // Head offset from the body centre; tips sideways as a lost duckling falls.
     let hx = 0;
     let hy = -headDist;
 
     if (won) {
-      // Staggered victory hop rippling through the crowd.
+      // Staggered victory hop rippling through the flock.
       const t = (fx.phaseTime - i * J.winJumpStaggerSec) / J.winJumpSec;
       if (t > 0 && t < 1) {
         py -= Math.sin(t * Math.PI) * J.winJumpHeightPx;
       }
     } else if (lost) {
-      // Units fall over in a wave spreading out from the blob centre.
+      // Ducklings fall over in a wave spreading out from the blob centre.
       const r = Math.sqrt(u.x * u.x + u.y * u.y) * bs;
       const t = clamp((fx.phaseTime - r / J.loseWaveSpeedPx) / J.loseFallSec, 0, 1);
       if (t > 0) {
@@ -293,23 +339,81 @@ function drawCrowd(
     py += bob;
     canvas.drawCircle(px, py, K.unitRadiusPx * bs, body);
     canvas.drawCircle(px + hx, py + hy, headR, head);
+    addBeak(beaks, px + hx, py + hy, headR);
   }
 
-  if (s.count > 0) {
+  // Mama duck leads the flock: bigger, white, just ahead of the blob's front
+  // edge, waddling on the same 2-frame clock.
+  const blobR = blobRadiusPx(s.unitsActive, K.slotSpacingPx) * bs;
+  const frontR = blobR * K.ellipseFlatten * (1 + fx.squish * 0.4);
+  const mamaR = K.unitRadiusPx * K.mamaScale * bs;
+  const mamaHeadR = mamaR * K.headRadiusFrac;
+  {
+    const frame = waddleFrame & 1;
+    let my = sy - frontR - K.mamaGapPx - mamaR;
+    let bob = frame ? -K.bobAmplitudePx : 0;
+    const mx = sx + (frame ? 1 : -1) * K.waddleRockPx;
+    let hx = 0;
+    let hy = -mamaR * 0.9;
+    if (won) {
+      const t = fx.phaseTime / J.winJumpSec;
+      if (t > 0 && t < 1) {
+        my -= Math.sin(t * Math.PI) * J.winJumpHeightPx;
+      }
+    } else if (lost) {
+      // Mama tips over with the front of the wave.
+      const t = clamp((fx.phaseTime - frontR / J.loseWaveSpeedPx) / J.loseFallSec, 0, 1);
+      if (t > 0) {
+        bob *= 1 - t;
+        const angle = t * (Math.PI / 2);
+        hx = Math.sin(angle) * mamaR * 0.9;
+        hy = -Math.cos(angle) * mamaR * 0.9;
+        my += t * mamaR * 0.5;
+      }
+    }
+    my += bob;
+    canvas.drawCircle(mx, my, mamaR, cache.paint('mama'));
+    canvas.drawCircle(mx + hx, my + hy, mamaHeadR, cache.paint('mamaHead'));
+    addBeak(beaks, mx + hx, my + hy, mamaHeadR);
+  }
+  canvas.drawPath(beaks, cache.paint('beak'));
+
+  if (s.count > 0 || fx.gambleSpinT > 0) {
+    // The label clears the flock and mama.
     const labelY =
-      sy - blobRadiusPx(s.unitsActive, K.slotSpacingPx) * bs - K.labelGapPx;
+      sy - Math.max(blobR, frontR + K.mamaGapPx + mamaR * 2) - K.labelGapPx;
+    // While a gamble spins, the label ticks slot-machine numbers instead of
+    // revealing the rolled count.
+    let labelText = `${s.count}`;
+    if (fx.gambleSpinT > 0) {
+      const tick = Math.floor((J.gambleSpinSec - fx.gambleSpinT) * J.gambleTickHz);
+      const hash = Math.imul(tick + 1, 2654435761) >>> 0;
+      labelText = `${(hash % Math.max(9, s.count * 3)) + 1}`;
+    }
     // Count label pops bigger for a beat whenever a gate or enemy changes it.
-    const pop = 1 + (J.labelPopScale - 1) * (fx.labelPopT / J.labelPopSec);
+    const pop = 1 + (fx.labelPopAmp - 1) * (fx.labelPopT / J.labelPopSec);
     if (pop > 1.001) {
       canvas.save();
       canvas.translate(sx, labelY);
       canvas.scale(pop, pop);
-      drawShadowedText(canvas, `${s.count}`, 0, 0, font, cache);
+      drawShadowedText(canvas, labelText, 0, 0, font, cache);
       canvas.restore();
     } else {
-      drawShadowedText(canvas, `${s.count}`, sx, labelY, font, cache);
+      drawShadowedText(canvas, labelText, sx, labelY, font, cache);
     }
   }
+}
+
+/** Append one up-pointing orange beak triangle at a duck head position. */
+function addBeak(path: SkPath, hx: number, hy: number, headR: number): void {
+  const K = CONFIG.crowd;
+  const halfW = headR * K.beakHalfWidthFrac;
+  const len = headR * K.beakLengthFrac;
+  const baseY = hy - headR * 0.5;
+  path.moveTo(hx - halfW, baseY);
+  path.lineTo(hx + halfW, baseY);
+  path.lineTo(hx, baseY - len);
+  path.close();
 }
 
 function drawParticles(canvas: SkCanvas, fx: FxState, cache: RenderCache): void {
@@ -332,11 +436,16 @@ function drawParticles(canvas: SkCanvas, fx: FxState, cache: RenderCache): void 
         paint
       );
     } else if (p.kind === ParticleKind.Coin) {
-      paint = cache.paint('bossCrown');
+      paint = cache.paint('coin');
       paint.setAlphaf(a);
       canvas.drawCircle(p.x, p.y, J.coinRadiusPx, paint);
+    } else if (p.kind === ParticleKind.Drained) {
+      // A duckling being pulled into the drain, shrinking as it goes.
+      paint = cache.paint('crowd');
+      paint.setAlphaf(a);
+      canvas.drawCircle(p.x, p.y, K.unitRadiusPx * (0.3 + 0.7 * (p.life / p.life0)), paint);
     } else {
-      // A popped-out crowd unit shrinking as it flies.
+      // A popped-out duckling shrinking as it flies.
       paint = cache.paint('crowd');
       paint.setAlphaf(a);
       canvas.drawCircle(p.x, p.y, K.unitRadiusPx * (0.5 + 0.5 * (p.life / p.life0)), paint);

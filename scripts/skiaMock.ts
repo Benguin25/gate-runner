@@ -72,8 +72,14 @@ class MockPath {
   addRect(r: number[]): void {
     this.commands.push(2, r[0], r[1], r[2], r[3]);
   }
+  addRRect(r: { rect: number[]; rx: number }): void {
+    this.commands.push(4, r.rect[0], r.rect[1], r.rect[2], r.rect[3], r.rx);
+  }
   close(): void {
     this.commands.push(3);
+  }
+  reset(): void {
+    this.commands.length = 0;
   }
 }
 
@@ -140,4 +146,5 @@ export function makeFont(): { measureText: (t: string) => { width: number } } {
 // Type-only re-exports used by the app code under test.
 export type SkCanvas = MockCanvas;
 export type SkPaint = MockPaint;
+export type SkPath = MockPath;
 export type SkFont = ReturnType<typeof makeFont>;

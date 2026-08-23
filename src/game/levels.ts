@@ -1,6 +1,6 @@
 import { CONFIG } from './config';
 import { applyOp } from './ops';
-import { mulberry32, pick, range, rangeInt, type Rng } from './rng';
+import { mulberry32, range, rangeInt, type Rng } from './rng';
 import type { EnemyClumpDef, GateOp, GatePairDef, LevelDef } from './types';
 import { clamp, lerp } from '../engine/utils';
 
@@ -16,8 +16,15 @@ import { clamp, lerp } from '../engine/utils';
 // Difficulty ramp (all tunables in CONFIG.levels):
 // - Early levels: every pair is an obvious good-vs-bad choice, boss well
 //   below the optimal count.
+// - From gambleStartLevel: about 1 in 4 levels gets a purple gamble gate
+//   (50/50 x3 or ÷3) as the middle of one trio — never forced, and drawn
+//   from a side RNG stream so the base layout doesn't reroll.
 // - From trapStartLevel: "trap" pairs — two teal gates (x2 vs +K) where the
 //   bigger-looking multiplier is often the worse pick at the current count.
+// - From seqTrapStartLevel: sequenced traps spanning two rows — a trap pair
+//   whose add side is strictly better, then a flat-subtraction squeeze pair.
+//   The squeeze widens the relative gap between the trap's outcomes, so only
+//   reading the next row (now rendered ahead) separates the choices.
 // - From splitStartLevel: near-even split pairs (+K vs x1.5) whose outcomes
 //   are within a few percent, plus a boss fraction close to optimal, so
 //   sloppy picks and enemy hits actually cost the level.
@@ -76,6 +83,20 @@ function generateLevel(baseLevel: number): LevelDef {
       : (L.splitChanceMax * (baseLevel - L.splitStartLevel + 1)) /
         (L.loopCount - L.splitStartLevel + 1);
 
+  // Sequenced traps span two consecutive rows; at most one per level, its
+  // start row decided up front so the emit loop below stays linear.
+  const seqChance =
+    baseLevel < L.seqTrapStartLevel
+      ? 0
+      : lerp(
+          L.seqTrapChanceL12,
+          L.seqTrapChanceL30,
+          (baseLevel - L.seqTrapStartLevel) / (L.loopCount - L.seqTrapStartLevel)
+        );
+  const seqRng = mulberry32(seed * 131 + 29);
+  const seqStart =
+    pairCount >= 2 && seqRng() < seqChance ? rangeInt(seqRng, 0, pairCount - 2) : -1;
+
   // Emit gates while tracking the greedy-optimal count and its value at each
   // row (used to scale enemies placed later).
   const startCount: number = CONFIG.crowd.startCount;
@@ -85,7 +106,11 @@ function generateLevel(baseLevel: number): LevelDef {
   for (let i = 0; i < pairCount; i++) {
     const roll = rng();
     let pair: [GateOp, GateOp];
-    if (roll < splitChance) {
+    if (i === seqStart) {
+      pair = makeSeqTrapPair(seqRng, optimal);
+    } else if (i === seqStart + 1 && seqStart >= 0) {
+      pair = makeSeqSqueezePair(seqRng, optimal);
+    } else if (roll < splitChance) {
       pair = makeSplitPair(rng, optimal);
     } else if (roll < splitChance + trapChance) {
       pair = makeTrapPair(rng, optimal);
@@ -98,6 +123,13 @@ function generateLevel(baseLevel: number): LevelDef {
     gatePairs.push({ z: gateZs[i], left, right });
     optimal = Math.max(applyOp(optimal, left), applyOp(optimal, right));
     optimalAfterZ.push({ z: gateZs[i], count: optimal });
+  }
+
+  // Gamble gate: its own RNG stream, so adding it never rerolls the layout.
+  const gambleRng = mulberry32(seed * 977 + 13);
+  if (baseLevel >= L.gambleStartLevel && gambleRng() < L.gambleLevelChance) {
+    const idx = rangeInt(gambleRng, 0, pairCount - 1);
+    gatePairs[idx].middle = { kind: 'gamble', value: L.gambleValue };
   }
 
   const enemies = makeEnemies(rng, t, gateZs, bossZ, startCount, optimalAfterZ);
@@ -149,6 +181,38 @@ function makeTrapPair(rng: Rng, count: number): [GateOp, GateOp] {
   return [
     { kind: 'mul', value: m },
     { kind: 'add', value: k },
+  ];
+}
+
+/**
+ * Sequenced trap, row A: x2 vs +K with K strictly above break-even, so the
+ * add is always the right pick — but only by a margin that hides inside
+ * one-row perception noise. Row B (below) is what exposes it.
+ */
+function makeSeqTrapPair(rng: Rng, count: number): [GateOp, GateOp] {
+  const L = CONFIG.levels;
+  const m = L.mulValue;
+  const ratio = range(rng, L.seqTrapRatioMin, L.seqTrapRatioMax);
+  const k = Math.max(1, niceValue(count * (m - 1) * ratio));
+  return [
+    { kind: 'mul', value: m },
+    { kind: 'add', value: k },
+  ];
+}
+
+/**
+ * Sequenced trap, row B: -F vs ÷D, both red. F is a big flat bite of the
+ * optimal count after row A (kept under half, so the sub side stays the
+ * lesser evil on the optimal line). Subtracting a constant stretches the
+ * RELATIVE gap between row A's two outcomes — planning across both rows
+ * separates them clearly, a greedy one-row read does not.
+ */
+function makeSeqSqueezePair(rng: Rng, count: number): [GateOp, GateOp] {
+  const L = CONFIG.levels;
+  const f = Math.max(1, niceValue(count * range(rng, L.seqSqueezeFracMin, L.seqSqueezeFracMax)));
+  return [
+    { kind: 'sub', value: f },
+    { kind: 'div', value: L.seqDivValue },
   ];
 }
 
@@ -237,9 +301,13 @@ function makeEnemies(
  * quantile. A player must beat the boss strictly, so the fraction of playouts
  * at or below the returned value is the modeled lose rate.
  *
- * The player model mirrors the tuning bot in scripts/bot.ts: noisy log-scale
- * comparison of gate outcomes with a small multiplier bias, occasional
- * outright blunders, and a fixed chance of eating each enemy clump.
+ * The player model mirrors the PLANNING bot in scripts/bot.ts: noisy
+ * log-scale comparison of gate outcomes with a small multiplier bias, a
+ * one-row-deeper re-read when the outcomes look close (the next row is
+ * rendered ahead, so a typical player uses it), occasional outright
+ * blunders, and a fixed chance of eating each enemy clump. Calibrating to a
+ * planning player is deliberate: it is what makes greedy one-row play lose
+ * ground on trap rows.
  */
 function bossFromPlayouts(
   seed: number,
@@ -270,21 +338,35 @@ function bossFromPlayouts(
   for (let k = 0; k < L.playoutCount; k++) {
     let c = startCount;
     sides.fill(0);
-    // Decide a gate's side with the noisy greedy model, at most once per run.
+    // Perceived log-size of an outcome, with the multiplier flash bias.
+    const seen = (value: number, mulCount: number): number =>
+      Math.log(Math.max(1, value)) +
+      mulCount * Math.log(L.typicalMulBias) +
+      gaussian(rng) * L.typicalSigma;
+    // Decide a gate's side with the noisy planning model, at most once per
+    // run: one-row read first, close calls re-scored through the next row.
     const decide = (i: number, count: number): number => {
       if (sides[i] === 0) {
         const gate = gatePairs[i];
-        const a = applyOp(count, gate.left);
-        const b = applyOp(count, gate.right);
-        const seenLeft =
-          Math.log(Math.max(1, a)) +
-          (gate.left.kind === 'mul' ? Math.log(L.typicalMulBias) : 0) +
-          gaussian(rng) * L.typicalSigma;
-        const seenRight =
-          Math.log(Math.max(1, b)) +
-          (gate.right.kind === 'mul' ? Math.log(L.typicalMulBias) : 0) +
-          gaussian(rng) * L.typicalSigma;
+        const seenLeft = seen(applyOp(count, gate.left), gate.left.kind === 'mul' ? 1 : 0);
+        const seenRight = seen(applyOp(count, gate.right), gate.right.kind === 'mul' ? 1 : 0);
         let side = seenLeft >= seenRight ? -1 : 1;
+        const next = gatePairs[i + 1];
+        const close =
+          Math.abs(seenLeft - seenRight) < Math.log(L.typicalPlanCloseRatio);
+        if (next && close) {
+          // Close call: the player works the visible numbers — the exact
+          // best two-step outcome through the next row decides.
+          const deep = (op: GateOp): number => {
+            const after = applyOp(count, op);
+            return Math.max(applyOp(after, next.left), applyOp(after, next.right));
+          };
+          const deepLeft = deep(gate.left);
+          const deepRight = deep(gate.right);
+          if (deepLeft !== deepRight) {
+            side = deepLeft > deepRight ? -1 : 1;
+          }
+        }
         if (rng() < L.typicalBlunderChance) {
           side = -side;
         }

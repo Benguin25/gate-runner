@@ -127,11 +127,11 @@ const styles = StyleSheet.create({
     width: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: CONFIG.colors.bossCrown,
+    backgroundColor: CONFIG.colors.coin,
     marginRight: 8,
   },
   coinsText: {
-    color: CONFIG.colors.bossCrown,
+    color: CONFIG.colors.coin,
     fontSize: 20,
     fontWeight: 'bold',
   },
@@ -180,7 +180,7 @@ const styles = StyleSheet.create({
     width: 16,
     height: 16,
     borderRadius: 8,
-    backgroundColor: CONFIG.colors.bossCrown,
+    backgroundColor: CONFIG.colors.coin,
     marginRight: 8,
   },
   buyText: {
