@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { StyleSheet, View, useWindowDimensions, type GestureResponderEvent } from 'react-native';
+import { PanResponder, StyleSheet, View, useWindowDimensions } from 'react-native';
 import type { SkCanvas } from '@shopify/react-native-skia';
 import { GameCanvas } from '../engine/GameCanvas';
 import { clamp } from '../engine/utils';
@@ -52,28 +52,38 @@ export function GameScreen() {
   );
 
   // Drag steering: horizontal finger travel moves the crowd centre across the
-  // lane. Relative drag, so the thumb can rest anywhere on the screen.
+  // lane. Relative drag, so the thumb can rest anywhere on the screen. The
+  // capture-phase responder claims the gesture before any child view can.
   const lastTouchX = useRef(0);
-  const onTouchStart = useCallback((e: GestureResponderEvent) => {
-    lastTouchX.current = e.nativeEvent.pageX;
-  }, []);
-  const onTouchMove = useCallback(
-    (e: GestureResponderEvent) => {
-      const dx = e.nativeEvent.pageX - lastTouchX.current;
-      lastTouchX.current = e.nativeEvent.pageX;
-      const laneHalfPx = width * CONFIG.lane.bottomHalfWidthFrac;
-      steerX.current = clamp(
-        steerX.current + (dx / laneHalfPx) * CONFIG.run.steerSensitivity,
-        -CONFIG.run.maxCrowdX,
-        CONFIG.run.maxCrowdX
-      );
-    },
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onStartShouldSetPanResponderCapture: () => true,
+        onMoveShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponderCapture: () => true,
+        onPanResponderGrant: (e) => {
+          lastTouchX.current = e.nativeEvent.pageX;
+        },
+        onPanResponderMove: (e) => {
+          const dx = e.nativeEvent.pageX - lastTouchX.current;
+          lastTouchX.current = e.nativeEvent.pageX;
+          const laneHalfPx = width * CONFIG.lane.bottomHalfWidthFrac;
+          steerX.current = clamp(
+            steerX.current + (dx / laneHalfPx) * CONFIG.run.steerSensitivity,
+            -CONFIG.run.maxCrowdX,
+            CONFIG.run.maxCrowdX
+          );
+        },
+      }),
     [width]
   );
 
   return (
-    <View style={styles.fill} onTouchStart={onTouchStart} onTouchMove={onTouchMove}>
-      <GameCanvas onUpdate={onUpdate} onRender={onRender} paused={paused} />
+    <View style={styles.fill} {...panResponder.panHandlers}>
+      <View style={styles.fill} pointerEvents="none">
+        <GameCanvas onUpdate={onUpdate} onRender={onRender} paused={paused} />
+      </View>
     </View>
   );
 }
