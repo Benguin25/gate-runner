@@ -26,7 +26,6 @@ const LEVEL_1: LevelDef = {
 };
 
 export function getLevel(levelNumber: number): LevelDef {
-  'worklet';
   // TODO(milestone 4): deterministic generation from levelNumber-derived seed.
   return LEVEL_1;
 }

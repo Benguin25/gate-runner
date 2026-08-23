@@ -13,8 +13,8 @@ import { projectDepth, isCulled } from '../engine/projection';
 import { clamp, lerp } from '../engine/utils';
 import type { GameFonts } from './fonts';
 
-// Everything is drawn procedurally with Skia — no image assets. Runs as a
-// worklet on the UI thread inside GameCanvas's picture recording.
+// Everything is drawn procedurally with Skia — no image assets. Called once
+// per frame from GameCanvas's picture recording on the JS thread.
 
 export function drawGame(
   canvas: SkCanvas,
@@ -24,7 +24,6 @@ export function drawGame(
   alpha: number,
   fonts: GameFonts
 ): void {
-  'worklet';
   const C = CONFIG.colors;
   const cx = w / 2;
   // Interpolate scroll and steering between fixed steps for a smooth render.
@@ -43,7 +42,6 @@ export function drawGame(
 }
 
 function drawLane(canvas: SkCanvas, w: number, h: number, dist: number, paint: SkPaint): void {
-  'worklet';
   const L = CONFIG.lane;
   const C = CONFIG.colors;
   const cx = w / 2;
@@ -106,7 +104,6 @@ function drawGates(
   paint: SkPaint,
   font: SkFont
 ): void {
-  'worklet';
   const G = CONFIG.gates;
   const C = CONFIG.colors;
   // Far to near, so closer walls draw on top.
@@ -157,7 +154,6 @@ function drawEnemies(
   paint: SkPaint,
   font: SkFont
 ): void {
-  'worklet';
   const E = CONFIG.enemies;
   const C = CONFIG.colors;
   for (let i = s.enemies.length - 1; i >= 0; i--) {
@@ -198,7 +194,6 @@ function drawBoss(
   paint: SkPaint,
   font: SkFont
 ): void {
-  'worklet';
   const B = CONFIG.boss;
   const C = CONFIG.colors;
   const dz = s.boss.z - dist;
@@ -264,7 +259,6 @@ function drawCrowd(
   paint: SkPaint,
   font: SkFont
 ): void {
-  'worklet';
   const K = CONFIG.crowd;
   const C = CONFIG.colors;
   const proj = projectDepth(0, w, h);
@@ -300,7 +294,6 @@ function drawCenteredText(
   font: SkFont,
   paint: SkPaint
 ): void {
-  'worklet';
   const width = font.measureText(text).width;
   canvas.drawText(text, cx - width / 2, baselineY, paint, font);
 }
@@ -313,7 +306,6 @@ function drawShadowedText(
   font: SkFont,
   paint: SkPaint
 ): void {
-  'worklet';
   const shadow = Skia.Paint();
   shadow.setColor(Skia.Color(CONFIG.colors.labelShadow));
   shadow.setAlphaf(0.8);

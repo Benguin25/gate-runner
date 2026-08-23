@@ -2,7 +2,6 @@ import type { GateOp } from './types';
 
 /** Apply a gate operator to the crowd count. Count stays a non-negative integer. */
 export function applyOp(count: number, op: GateOp): number {
-  'worklet';
   switch (op.kind) {
     case 'add':
       return count + op.value;
@@ -17,7 +16,6 @@ export function applyOp(count: number, op: GateOp): number {
 }
 
 export function opLabel(op: GateOp): string {
-  'worklet';
   switch (op.kind) {
     case 'add':
       return `+${op.value}`;
@@ -32,6 +30,5 @@ export function opLabel(op: GateOp): string {
 
 /** Good gates (teal) grow the crowd; bad gates (red) shrink it. */
 export function isGoodOp(op: GateOp): boolean {
-  'worklet';
   return op.kind === 'add' || op.kind === 'mul';
 }

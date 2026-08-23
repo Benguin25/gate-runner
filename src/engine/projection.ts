@@ -18,7 +18,6 @@ export interface Projected {
 }
 
 export function projectDepth(dz: number, w: number, h: number): Projected {
-  'worklet';
   const L = CONFIG.lane;
   const p = dz / (dz + L.perspectiveDepth);
   const y = lerp(h * L.crowdYFrac, h * L.horizonYFrac, p);
@@ -28,7 +27,6 @@ export function projectDepth(dz: number, w: number, h: number): Projected {
 }
 
 export function isCulled(dz: number): boolean {
-  'worklet';
   const L = CONFIG.lane;
   if (dz < L.cullBehind) {
     return true;

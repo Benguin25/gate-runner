@@ -34,7 +34,6 @@ export function createSimState(level: LevelDef): SimState {
 
 /** One fixed 60hz simulation step. Mutates the state in place; returns the phase after the step. */
 export function updateSim(s: SimState, dt: number): SimPhase {
-  'worklet';
   if (s.phase === 'won' || s.phase === 'lost') {
     return s.phase;
   }
@@ -120,7 +119,6 @@ export function updateSim(s: SimState, dt: number): SimPhase {
 // new units spring in from the crowd centre, and the count label carries the
 // real number.
 function updateUnits(s: SimState, dt: number): void {
-  'worklet';
   const n = Math.min(s.count, CONFIG.crowd.renderCap);
   if (n > s.unitsActive) {
     for (let i = s.unitsActive; i < n; i++) {
