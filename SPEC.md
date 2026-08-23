@@ -87,3 +87,12 @@ Visual reference: Count Masters / Top War ads. Blue crowd, teal good gates, red 
 5. Shop + persistence
 6. Juice
 7. Ads + IAP + iOS (separate instructions later)
+
+## Theme
+Ducklings following mama duck. The crowd is yellow ducklings; the count label sits
+over the flock. Lane is a park path with a pond feel. Boss at the end is a storm
+drain with a number on it — beat it and mama caps the drain, ducklings celebrate;
+lose and they get pulled in one by one (keep it cartoony, they pop back out on retry).
+Good gates teal, bad gates red, unchanged. Ducklings: yellow circle body, smaller
+head circle, orange triangle beak, 2-frame waddle bob. Mama duck leads the flock,
+slightly bigger, white.
