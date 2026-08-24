@@ -5,11 +5,22 @@ export interface GateOp {
   value: number;
 }
 
+/**
+ * The gamble gate: 50/50 xN or ÷N, rolled by the sim on contact from the
+ * per-attempt seeded RNG. Only ever appears as the middle option of a trio.
+ */
+export interface GambleOp {
+  kind: 'gamble';
+  value: number;
+}
+
 export interface GatePairDef {
   /** World-z of the gate wall. */
   z: number;
   left: GateOp;
   right: GateOp;
+  /** Optional middle gamble gate; the row becomes a trio of thirds. */
+  middle?: GambleOp;
 }
 
 export interface EnemyClumpDef {
@@ -40,8 +51,11 @@ export type SimPhase = 'running' | 'boss' | 'won' | 'lost';
 export type SimEventKind =
   | 'gateGood'
   | 'gateBad'
+  | 'gambleWin'
+  | 'gambleLose'
   | 'enemyHit'
   | 'bossHit'
+  | 'drained'
   | 'won'
   | 'lost';
 
@@ -51,7 +65,7 @@ export interface SimEvent {
 
 export interface GateState extends GatePairDef {
   used: boolean;
-  /** -1 = left hit, 1 = right hit, 0 = not hit. */
+  /** Meaningful once used: -1 = left hit, 1 = right hit, 0 = middle hit. */
   hitSide: -1 | 0 | 1;
   /** Seconds of hit flash remaining. */
   flash: number;
@@ -83,6 +97,11 @@ export interface SimState {
   boss: { z: number; count: number; knockT: number };
   /** Boss-fight multiplier per unit (strength upgrade). */
   unitStrength: number;
+  /**
+   * Seeded per level attempt; resolves gamble gates. Deterministic given the
+   * attempt seed, so headless runs (bot) reproduce exactly.
+   */
+  gambleRng: () => number;
   drainAcc: number;
   units: UnitVis[];
   unitsActive: number;

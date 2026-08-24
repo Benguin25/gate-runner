@@ -30,7 +30,15 @@ export function GameScreen() {
     const base = getLevel(levelNumber);
     return { ...base, startCount: base.startCount + startCrowdBonus(upgrades) };
   }, [levelNumber, upgrades]);
-  const simOptions = useMemo(() => ({ unitStrength: unitStrength(upgrades) }), [upgrades]);
+  // Each retry rerolls the gamble gates: the attempt seed mixes the level
+  // seed with the run token (deterministic headless runs pass their own).
+  const simOptions = useMemo(
+    () => ({
+      unitStrength: unitStrength(upgrades),
+      gambleSeed: (level.seed * 49297 + runId * 233280 + 1) >>> 0,
+    }),
+    [upgrades, level.seed, runId]
+  );
   const fonts = useMemo(() => createGameFonts(), []);
   const cache = useMemo(() => createRenderCache(), []);
   const sim = useRef(createSimState(level, simOptions));
@@ -62,11 +70,19 @@ export function GameScreen() {
         case 'gateBad':
           playSfx('deflate');
           break;
+        case 'gambleWin':
+        case 'gambleLose':
+          // The roll's reveal waits for the slot spin; onUpdate plays the
+          // result sound when the fx layer lands it.
+          playSfx('spin');
+          break;
         case 'enemyHit':
           playSfx('hit');
           break;
         case 'bossHit':
           playSfx('boss');
+          break;
+        case 'drained':
           break;
         case 'won':
           playSfx('win');
@@ -94,7 +110,13 @@ export function GameScreen() {
         }
         s.events.length = 0;
       }
-      updateFx(f, dt, s);
+      updateFx(f, dt, s, width, height);
+
+      // Gamble spin just landed: reveal with the matching sound and haptic.
+      if (f.gambleLanded) {
+        playSfx(f.gambleGood ? 'pop' : 'deflate');
+        playHaptic(f.gambleGood ? 'gateGood' : 'gateBad');
+      }
 
       // Let the celebration/defeat animation play before the result overlay.
       if ((s.phase === 'won' || s.phase === 'lost') && !f.resultShown) {
@@ -115,7 +137,7 @@ export function GameScreen() {
         }
       }
     },
-    [onSimEvent, win, lose, addCoins, upgrades]
+    [onSimEvent, win, lose, addCoins, upgrades, width, height]
   );
 
   const onRender = useCallback(

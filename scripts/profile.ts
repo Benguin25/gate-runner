@@ -57,7 +57,7 @@ function main(): void {
       applyFxEvent(fx, ev, sim, WIDTH, HEIGHT);
     }
     sim.events.length = 0;
-    updateFx(fx, dt, sim);
+    updateFx(fx, dt, sim, WIDTH, HEIGHT);
     // Loop the run so gates/enemies (and gate-hit particle bursts) stay in
     // view for every measured frame.
     if (sim.distance > 28 || sim.phase !== 'running') {

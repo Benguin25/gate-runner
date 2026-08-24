@@ -53,11 +53,11 @@ const styles = StyleSheet.create({
     width: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: CONFIG.colors.bossCrown,
+    backgroundColor: CONFIG.colors.coin,
     marginRight: 8,
   },
   coinsText: {
-    color: CONFIG.colors.bossCrown,
+    color: CONFIG.colors.coin,
     fontSize: 20,
     fontWeight: 'bold',
   },
@@ -76,7 +76,7 @@ const styles = StyleSheet.create({
     marginBottom: 48,
   },
   playButton: {
-    backgroundColor: CONFIG.colors.crowd,
+    backgroundColor: CONFIG.colors.button,
     paddingHorizontal: 64,
     paddingVertical: 20,
     borderRadius: 999,

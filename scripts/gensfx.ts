@@ -77,12 +77,31 @@ function envExp(t: number, rate: number): number {
 
 // --- The sounds ---------------------------------------------------------
 
-/** Gate pass: bright little pop, pitch dropping fast. */
+/**
+ * One cartoon quack: a nasal falling sawtooth with a formant partial, a
+ * fast buzz, and a "wah" envelope. Shared by the gate pop and the win chorus.
+ */
+function quack(t: number, f0: number, dur: number): number {
+  if (t < 0 || t >= dur) {
+    return 0;
+  }
+  const f1 = f0 * 0.62;
+  const k = Math.log(f1 / f0) / dur;
+  const phase = (f0 * (Math.exp(k * t) - 1)) / k;
+  const saw = 2 * (phase - Math.floor(phase)) - 1;
+  const formant = Math.sin(TWO_PI * 1150 * t) * 0.3;
+  const buzz = 1 + 0.22 * Math.sin(TWO_PI * 95 * t);
+  const env = Math.min(1, t / 0.012) * Math.pow(1 - t / dur, 1.35);
+  return (saw * 0.7 + formant) * buzz * env;
+}
+
+/** Gate pass: bright little pop with a small quack layered on top. */
 function pop(): Int16Array {
-  return render(0.13, (t) => {
+  return render(0.22, (t) => {
     const tone = glide(t, 1050, 420, 0.13);
     const sparkle = glide(t, 2100, 840, 0.13) * 0.25;
-    return (tone + sparkle) * envExp(t, 26) * 0.75;
+    const popPart = (tone + sparkle) * envExp(t, 26) * 0.6;
+    return popPart + quack(t - 0.015, 470, 0.19) * 0.42;
   });
 }
 
@@ -131,21 +150,38 @@ function note(t: number, f: number): number {
   );
 }
 
-/** Win: rising C-major arpeggio with a long sparkling last note. */
+/** Win: a happy chorus of quacks, rising, with a long celebratory last one. */
 function win(): Int16Array {
-  const notes = [523.25, 659.25, 783.99, 1046.5]; // C5 E5 G5 C6
-  const step = 0.115;
-  return render(step * 3 + 0.45, (t) => {
+  // Staggered flock voices at varied pitches; the finale sits highest.
+  const voices: [number, number, number][] = [
+    // [start, f0, dur]
+    [0.0, 430, 0.17],
+    [0.07, 520, 0.16],
+    [0.13, 465, 0.18],
+    [0.21, 560, 0.16],
+    [0.28, 495, 0.18],
+    [0.38, 640, 0.3],
+  ];
+  return render(0.72, (t) => {
     let v = 0;
-    for (let i = 0; i < notes.length; i++) {
-      const nt = t - i * step;
-      if (nt < 0) {
-        continue;
-      }
-      const isLast = i === notes.length - 1;
-      v += note(nt, notes[i]) * envExp(nt, isLast ? 6 : 16) * (isLast ? 0.55 : 0.4);
+    for (let i = 0; i < voices.length; i++) {
+      const [start, f0, dur] = voices[i];
+      v += quack(t - start, f0, dur) * (i === voices.length - 1 ? 0.5 : 0.34);
     }
     return v;
+  });
+}
+
+/** Gamble gate: slot-machine ticks that swell until the number lands. */
+function spin(): Int16Array {
+  const dur = 0.75; // Matches CONFIG.juice.gambleSpinSec.
+  const period = 1 / 14; // Matches CONFIG.juice.gambleTickHz.
+  return render(dur, (t) => {
+    const tt = t % period;
+    const click =
+      Math.sin(TWO_PI * 1900 * tt) * envExp(tt, 260) * 0.5 +
+      Math.sin(TWO_PI * 3150 * tt) * envExp(tt, 320) * 0.2;
+    return click * (0.45 + 0.55 * (t / dur));
   });
 }
 
@@ -184,6 +220,7 @@ function main(): void {
     ['deflate', deflate()],
     ['hit', hit()],
     ['boss', boss()],
+    ['spin', spin()],
     ['win', win()],
     ['lose', lose()],
     ['coin', coin()],

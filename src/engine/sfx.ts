@@ -10,6 +10,7 @@ const SOURCES = {
   deflate: require('../../assets/sfx/deflate.wav'),
   hit: require('../../assets/sfx/hit.wav'),
   boss: require('../../assets/sfx/boss.wav'),
+  spin: require('../../assets/sfx/spin.wav'),
   win: require('../../assets/sfx/win.wav'),
   lose: require('../../assets/sfx/lose.wav'),
   coin: require('../../assets/sfx/coin.wav'),

@@ -56,8 +56,18 @@ export const CONFIG = {
     ellipseFlatten: 0.55,
     // How fast rendered units chase their formation slots (1/sec).
     slotLerp: 10,
+    // Ducklings do a 2-frame waddle: the bob snaps between two poses at this
+    // rate (frames/sec) with a small sideways rock on alternate frames.
     bobAmplitudePx: 1.6,
     bobFrequency: 9,
+    waddleFramesPerSec: 7,
+    waddleRockPx: 1.1,
+    // Beak: orange triangle on the head, pointing up the lane.
+    beakHalfWidthFrac: 0.5,
+    beakLengthFrac: 0.9,
+    // Mama duck leads the flock: bigger, white, this far ahead of the blob edge.
+    mamaScale: 1.65,
+    mamaGapPx: 6,
     labelFontSize: 42,
     labelGapPx: 22,
   },
@@ -71,6 +81,14 @@ export const CONFIG = {
     textFontSize: 30,
     // Chosen gate flashes for this long after being hit.
     hitFlashSec: 0.4,
+    // Trio rows (with a middle gamble gate) split the lane in thirds; the
+    // crowd centre picks the middle when |x| is under this normalized bound.
+    trioThirdX: 1 / 3,
+    // Lookahead: the pair after the current one renders dimmed but readable;
+    // pairs beyond it are hidden so the choice stays a two-row read.
+    lookaheadAlphaFrac: 0.55,
+    // Far-pair text never scales below this, so the operators stay readable.
+    lookaheadTextMinScale: 0.55,
   },
 
   enemies: {
@@ -84,15 +102,25 @@ export const CONFIG = {
   },
 
   boss: {
-    // Boss fight starts when the crowd gets this close (world units).
+    // The boss is the storm drain at the end of the path. The fight starts
+    // when the crowd gets this close (world units).
     contactDistance: 2.5,
     bodyRadiusPx: 30,
-    headRadiusFrac: 0.6,
+    // Grate look: rim thickness and horizontal slot bars as fractions of the
+    // body radius, flattened to lie on the path.
+    rimFrac: 0.16,
+    slotCount: 3,
+    slotWidthFrac: 1.3,
+    slotHeightFrac: 0.16,
+    drainFlatten: 0.62,
+    // Suction pulse while a losing crowd is being pulled in.
+    pulseScale: 0.05,
+    pulseHz: 2.2,
     numberFontSize: 34,
     numberGapPx: 18,
-    // Losing crowds drain at this many units per second.
+    // Losing crowds get pulled into the drain at this many ducklings per second.
     drainPerSec: 25,
-    // Duration of the boss knockback tumble before the win overlay.
+    // Win: mama caps the drain — the cover slides on over this long.
     knockbackSec: 0.9,
   },
 
@@ -128,6 +156,31 @@ export const CONFIG = {
     trapRampExponent: 0.6,
     splitStartLevel: 20,
     splitChanceMax: 0.4,
+
+    // Gamble gate: purple x3/÷3 middle option. From gambleStartLevel, about
+    // 1 in gambleLevelChance⁻¹ levels get one, at most one per level, always
+    // as the middle of a trio so it is never forced. Placed from a side RNG
+    // stream so it never rerolls the base layout.
+    gambleStartLevel: 8,
+    gambleLevelChance: 0.25,
+    gambleValue: 3,
+
+    // Sequenced traps (lookahead): pair A is x2 vs +K with the add strictly
+    // better (ratio > 1 band below), then pair B flat-subtracts a big chunk
+    // (-F vs ÷seqDivValue). The subtraction widens the relative gap between
+    // A's two outcomes, so reading both rows separates them while a one-row
+    // greedy read stays inside perception noise. Chance ramps L12 -> L30.
+    seqTrapStartLevel: 12,
+    seqTrapChanceL12: 0.5,
+    seqTrapChanceL30: 0.9,
+    // Pair-A add sits this far above break-even (add strictly better).
+    seqTrapRatioMin: 1.12,
+    seqTrapRatioMax: 1.38,
+    // Pair-B subtraction as a fraction of the optimal count after A; must
+    // stay under 1/2 so the sub side beats ÷seqDivValue on the optimal line.
+    seqSqueezeFracMin: 0.38,
+    seqSqueezeFracMax: 0.47,
+    seqDivValue: 3,
 
     // Operator value ranges as fractions of the current greedy-optimal count.
     // Good-gate growth ramps up with level so early bosses stay small
@@ -178,6 +231,11 @@ export const CONFIG = {
     typicalMulBias: 1.06,
     typicalBlunderChance: 0.012,
     typicalDodgeFailChance: 0.15,
+    // The typical player reads the next row too (it is rendered ahead): a
+    // one-row read within this perceived ratio is re-scored one row deeper.
+    // Greedy one-row play therefore under-performs the boss calibration on
+    // trap rows — that is what makes sequenced traps bite.
+    typicalPlanCloseRatio: 1.65,
     // Normalized-x a player runs at inside their chosen gate half.
     typicalAimX: 0.45,
     targetLoseRateL1: 0.02,
@@ -202,6 +260,20 @@ export const CONFIG = {
     // Full-screen red flash on a bad gate.
     redFlashAlpha: 0.3,
     redFlashSec: 0.35,
+
+    // Gamble gate drama: purple flash on contact, then the count label spins
+    // slot-machine numbers ticking at gambleTickHz before the result lands
+    // with a big pop (and a second flash coloured by the outcome).
+    gambleFlashAlpha: 0.38,
+    gambleFlashSec: 0.4,
+    gambleSpinSec: 0.75,
+    gambleTickHz: 14,
+    gambleLandPopScale: 1.9,
+
+    // Losing to the drain: ducklings get pulled in one by one — small yellow
+    // particles fly from the flock into the grate over this long.
+    drainPullSec: 0.4,
+    drainPullMaxPerTick: 2,
 
     // Confetti of small squares in the gate colour on every gate pass.
     confettiCount: 22,
@@ -270,20 +342,31 @@ export const CONFIG = {
   },
 
   colors: {
-    bg: '#0F172A',
-    lane: '#64748B',
-    laneEdge: '#94A3B8',
-    stripe: '#F1F5F9',
-    crowd: '#3B82F6',
-    crowdHead: '#93C5FD',
+    // Duckling theme: pond-dark background, sandy park path, yellow flock.
+    bg: '#0B3B45',
+    lane: '#9C8A66',
+    laneEdge: '#C7B183',
+    stripe: '#F5EFDC',
+    crowd: '#FDE047',
+    crowdHead: '#FEF08A',
+    beak: '#F97316',
+    mama: '#FFFFFF',
+    mamaHead: '#F8FAFC',
     goodGate: '#14B8A6',
     badGate: '#EF4444',
+    gambleGate: '#A855F7',
     gateText: '#FFFFFF',
     enemy: '#EF4444',
     enemyHead: '#FCA5A5',
-    boss: '#DC2626',
-    bossCrown: '#FBBF24',
+    // Storm drain greys: grate body, dark slots, rim, and the win cap.
+    drain: '#3F3F46',
+    drainSlot: '#18181B',
+    drainRim: '#71717A',
+    drainCap: '#A1A1AA',
+    coin: '#FBBF24',
+    // UI accent for buttons (the yellow flock colour reads poorly there).
+    button: '#0D9488',
     label: '#FFFFFF',
-    labelShadow: '#0F172A',
+    labelShadow: '#1C1917',
   },
 } as const;
