@@ -122,6 +122,9 @@ class MockCanvas {
   drawOval(r: number[], p: MockPaint): void {
     draw(r[0], r[1], r[2], r[3], p.alpha);
   }
+  drawLine(x0: number, y0: number, x1: number, y1: number, p: MockPaint): void {
+    draw(x0, y0, x1, y1, p.alpha);
+  }
   clipRRect(_r: { rect: number[]; rx: number }, _op: number, _aa: boolean): void {}
   drawPath(path: MockPath, p: MockPaint): void {
     draw(path.commands.length, p.alpha);
