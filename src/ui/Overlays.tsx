@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { playSfx } from '../engine/sfx';
 import { CONFIG } from '../game/config';
 import { useGameStore } from '../store/gameStore';
 import { useProgressStore } from '../store/progressStore';
@@ -23,12 +24,14 @@ export function ResultOverlay() {
   const won = phase === 'won';
 
   const onPrimary = () => {
+    playSfx('click');
     if (won) {
       advanceLevel();
     }
     newRun();
   };
   const onHome = () => {
+    playSfx('click');
     if (won) {
       advanceLevel();
     }

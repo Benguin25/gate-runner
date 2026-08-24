@@ -35,6 +35,12 @@ export const CONFIG = {
     stripeAlpha: 0.16,
   },
 
+  audio: {
+    // Every gate-pass quack retriggers at a random playback rate in
+    // 1 ± this fraction (pitch shifts with rate), so quacks never sound stamped.
+    quackPitchJitter: 0.1,
+  },
+
   run: {
     // Crowd auto-run speed, world units per second.
     speed: 7,
@@ -56,6 +62,9 @@ export const CONFIG = {
     headRadiusFrac: 0.58,
     // Phyllotaxis slot spacing (px at scale 1). Loose, so ducklings separate.
     slotSpacingPx: 17,
+    // Each slot is nudged by a stable per-index offset of up to this fraction
+    // of the spacing in x and y, so the flock reads organic, never as rows.
+    slotJitterFrac: 0.3,
     // Blob is flattened vertically to match the fake perspective.
     ellipseFlatten: 0.55,
     // How fast rendered units chase their formation slots (1/sec).
@@ -81,6 +90,9 @@ export const CONFIG = {
     // Mama duck leads the flock: bigger, white, this far ahead of the blob edge.
     mamaScale: 1.6,
     mamaGapPx: 8,
+    // Mama's eyes are enlarged past the duckling fraction so her face reads
+    // at her bigger scale.
+    mamaEyeScale: 1.35,
     // Mama's stern brow: line endpoints and thickness as fracs of head radius.
     browInFrac: 0.14,
     browOutFrac: 0.78,
@@ -88,14 +100,14 @@ export const CONFIG = {
     browOutUpFrac: 0.75,
     browStrokeFrac: 0.2,
     labelFontSize: 42,
-    labelGapPx: 22,
   },
 
   gates: {
     // Wall visuals.
     heightPx: 62,
     cornerRadiusPx: 10,
-    opacity: 0.7,
+    // Near-solid walls: the operator has to read instantly at a glance.
+    opacity: 0.9,
     passedOpacity: 0.28,
     textFontSize: 30,
     // Chosen gate flashes for this long after being hit.
@@ -111,11 +123,13 @@ export const CONFIG = {
   },
 
   enemies: {
-    unitRadiusPx: 7.5,
-    slotSpacingPx: 11,
-    // Render-only cap per clump; the pill badge carries the real count.
-    // Outlined crabs cost several draws each, so this stays modest for 60fps.
-    renderCap: 22,
+    // Few big crabs per clump so each one reads at distance; the pill badge
+    // carries the real count.
+    unitRadiusPx: 11,
+    slotSpacingPx: 17,
+    // Render-only cap per clump. Outlined crabs cost several draws each, so
+    // this stays low for 60fps.
+    renderCap: 8,
     // Crowd centre must be within this normalized-x distance of the clump
     // centre when crossing its row to make contact.
     hitWindowX: 0.38,
@@ -458,10 +472,10 @@ export const CONFIG = {
     bossShadowAlpha: 0.2,
     bossShadowScale: 1.12,
 
-    // Gate frame: two posts + crossbar, bevelled face, inner glow.
-    postWidthPx: 7,
-    postRisePx: 10,
-    crossbarHeightPx: 8,
+    // Gate frame: two chunky posts + crossbar, bevelled face, inner glow.
+    postWidthPx: 10,
+    postRisePx: 12,
+    crossbarHeightPx: 11,
     bevelHeightPx: 6,
     bevelAlpha: 0.2,
     glowInsetPx: 5,
@@ -471,10 +485,10 @@ export const CONFIG = {
     goodPulseHz: 1.4,
     goodPulseAmp: 0.4,
     goodPulseGrowPx: 2,
-    // Bad gates: low-opacity diagonal warning stripes.
-    warnStripeAlpha: 0.14,
-    warnStripeWidthPx: 12,
-    warnStripeGapPx: 15,
+    // Bad gates: bold diagonal warning stripes.
+    warnStripeAlpha: 0.3,
+    warnStripeWidthPx: 16,
+    warnStripeGapPx: 13,
     // Gamble gate: twinkling sparkles over the purple wall.
     sparkleCount: 5,
     sparkleHz: 1.8,
@@ -503,8 +517,10 @@ export const CONFIG = {
     badgeRadiusPx: 16,
     badgeRimPx: 3,
 
-    // HUD: rounded tag behind the chunky-outlined count label.
-    hudTagAlpha: 0.28,
+    // HUD: rounded tag behind the chunky-outlined count label, pinned at
+    // bottom-centre (screen-height frac) so it can never overlap gate text.
+    hudCountYFrac: 0.93,
+    hudTagAlpha: 0.55,
     hudTagPadXPx: 14,
     hudTagPadYPx: 10,
     hudTagRadiusPx: 16,

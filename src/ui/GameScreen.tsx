@@ -3,7 +3,7 @@ import { PanResponder, StyleSheet, View, useWindowDimensions } from 'react-nativ
 import type { SkCanvas } from '@shopify/react-native-skia';
 import { GameCanvas } from '../engine/GameCanvas';
 import { playHaptic } from '../engine/haptics';
-import { initSfx, playSfx } from '../engine/sfx';
+import { playQuack, playSfx } from '../engine/sfx';
 import { clamp } from '../engine/utils';
 import { CONFIG } from '../game/config';
 import { coinsForClear, startCrowdBonus, unitStrength } from '../game/economy';
@@ -47,10 +47,6 @@ export function GameScreen() {
   const paused = useRef(false);
 
   useEffect(() => {
-    initSfx();
-  }, []);
-
-  useEffect(() => {
     // Retry / next level: rebuild sim and juice state, unpause.
     sim.current = createSimState(level, simOptions);
     fx.current = createFxState();
@@ -66,30 +62,33 @@ export function GameScreen() {
       switch (ev.kind) {
         case 'gateGood':
           playSfx('pop');
+          playQuack();
           break;
         case 'gateBad':
-          playSfx('deflate');
+          playSfx('womp');
+          playSfx('peep');
           break;
         case 'gambleWin':
         case 'gambleLose':
           // The roll's reveal waits for the slot spin; onUpdate plays the
           // result sound when the fx layer lands it.
-          playSfx('spin');
+          playSfx('ratchet');
           break;
         case 'enemyHit':
-          playSfx('hit');
+          playSfx('peep');
           break;
         case 'bossHit':
-          playSfx('boss');
+          playSfx('thud');
           break;
         case 'drained':
           break;
         case 'won':
-          playSfx('win');
-          playSfx('coin');
+          playSfx('chorus');
+          playSfx('coins');
           break;
         case 'lost':
-          playSfx('lose');
+          playSfx('snap');
+          playSfx('descend');
           break;
       }
     },
@@ -114,7 +113,7 @@ export function GameScreen() {
 
       // Gamble spin just landed: reveal with the matching sound and haptic.
       if (f.gambleLanded) {
-        playSfx(f.gambleGood ? 'pop' : 'deflate');
+        playSfx(f.gambleGood ? 'ding' : 'buzz');
         playHaptic(f.gambleGood ? 'gateGood' : 'gateBad');
       }
 

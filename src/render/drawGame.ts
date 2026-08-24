@@ -785,7 +785,7 @@ function drawCrowd(
     addBeak(mamaBeak, mhx, mhy, mamaHeadR, dirX, dirY, 0);
     canvas.drawPath(mamaBeak, cache.paint('beak'));
     const mamaEyes = cache.scratchPath(2);
-    addEyes(mamaEyes, mhx, mhy, mamaHeadR, dirX, dirY);
+    addEyes(mamaEyes, mhx, mhy, mamaHeadR, dirX, dirY, K.mamaEyeScale);
     canvas.drawPath(mamaEyes, cache.paint('outline'));
     // Mama's visible brow: two strokes slanting in over the eyes.
     const brow = cache.strokePaint('outline');
@@ -804,9 +804,9 @@ function drawCrowd(
   }
 
   if (s.count > 0 || fx.gambleSpinT > 0) {
-    // The label clears the flock and mama.
-    const labelY =
-      sy - Math.max(blobR, frontR + K.mamaGapPx + mamaR * 2) - K.labelGapPx;
+    // The count lives in a fixed bottom-centre HUD tag, below the crowd row,
+    // so it can never overlap gate text however big the flock gets.
+    const labelY = h * V.hudCountYFrac;
     // While a gamble spins, the label ticks slot-machine numbers instead of
     // revealing the rolled count.
     let labelText = `${s.count}`;
@@ -818,7 +818,7 @@ function drawCrowd(
     // Count label pops bigger for a beat whenever a gate or enemy changes it.
     const pop = 1 + (fx.labelPopAmp - 1) * (fx.labelPopT / J.labelPopSec);
     canvas.save();
-    canvas.translate(sx, labelY);
+    canvas.translate(cx, labelY);
     if (pop > 1.001) {
       canvas.scale(pop, pop);
     }
@@ -868,21 +868,25 @@ function addBeak(
   path.close();
 }
 
-/** Append the two black eyes on the upper sides of a duck head. */
+/**
+ * Append the two black eyes on the upper sides of a duck head. `rScale`
+ * enlarges only the eye radius (mama's face reads at her bigger scale).
+ */
 function addEyes(
   path: SkPath,
   hx: number,
   hy: number,
   headR: number,
   dirX: number,
-  dirY: number
+  dirY: number,
+  rScale = 1
 ): void {
   const K = CONFIG.crowd;
   const upX = dirX * headR * K.eyeUpFrac;
   const upY = dirY * headR * K.eyeUpFrac;
   const outX = -dirY * headR * K.eyeOutFrac;
   const outY = dirX * headR * K.eyeOutFrac;
-  const r = headR * K.eyeRadiusFrac;
+  const r = headR * K.eyeRadiusFrac * rScale;
   path.addCircle(hx + upX + outX, hy + upY + outY, r);
   path.addCircle(hx + upX - outX, hy + upY - outY, r);
 }

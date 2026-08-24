@@ -1,8 +1,22 @@
 import { CONFIG } from '../game/config';
+import { hash01 } from './utils';
 
-// Sunflower / phyllotaxis layout: organic-looking blob, deterministic per index.
+// Sunflower / phyllotaxis layout: organic-looking blob, deterministic per
+// index. Each slot is nudged by a stable per-index jitter (a bounded fraction
+// of the spacing, so neighbours can't collide) — pure phyllotaxis rings read
+// as neat rows once the blob is flattened for the fake perspective.
 
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+
+function rawSlotX(i: number): number {
+  const jx = (hash01(i * 11 + 5) - 0.5) * 2 * CONFIG.crowd.slotJitterFrac;
+  return Math.cos(i * GOLDEN_ANGLE) * Math.sqrt(i + 0.5) + jx;
+}
+
+function rawSlotY(i: number): number {
+  const jy = (hash01(i * 11 + 6) - 0.5) * 2 * CONFIG.crowd.slotJitterFrac;
+  return (Math.sin(i * GOLDEN_ANGLE) * Math.sqrt(i + 0.5) + jy) * CONFIG.crowd.ellipseFlatten;
+}
 
 // Slots up to the render cap are precomputed at unit spacing: slot lookups run
 // per unit per fixed step (and again for enemy clumps in the render), so the
@@ -11,28 +25,16 @@ const TABLE_SIZE = CONFIG.crowd.renderCap;
 const tableX = new Float32Array(TABLE_SIZE);
 const tableY = new Float32Array(TABLE_SIZE);
 for (let i = 0; i < TABLE_SIZE; i++) {
-  const r = Math.sqrt(i + 0.5);
-  tableX[i] = Math.cos(i * GOLDEN_ANGLE) * r;
-  tableY[i] = Math.sin(i * GOLDEN_ANGLE) * r * CONFIG.crowd.ellipseFlatten;
+  tableX[i] = rawSlotX(i);
+  tableY[i] = rawSlotY(i);
 }
 
 export function slotX(i: number, spacingPx: number): number {
-  if (i < TABLE_SIZE) {
-    return tableX[i] * spacingPx;
-  }
-  return Math.cos(i * GOLDEN_ANGLE) * spacingPx * Math.sqrt(i + 0.5);
+  return (i < TABLE_SIZE ? tableX[i] : rawSlotX(i)) * spacingPx;
 }
 
 export function slotY(i: number, spacingPx: number): number {
-  if (i < TABLE_SIZE) {
-    return tableY[i] * spacingPx;
-  }
-  return (
-    Math.sin(i * GOLDEN_ANGLE) *
-    spacingPx *
-    Math.sqrt(i + 0.5) *
-    CONFIG.crowd.ellipseFlatten
-  );
+  return (i < TABLE_SIZE ? tableY[i] : rawSlotY(i)) * spacingPx;
 }
 
 /** Radius (px, before blob scaling) of a blob with `rendered` units. */

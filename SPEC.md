@@ -11,7 +11,7 @@ Visual reference: Count Masters / Top War ads. Blue crowd, teal good gates, red 
 - Portrait, fixed camera looking down a lane from slightly behind the crowd. Fake perspective: lane narrows toward the top, sprites scale with y.
 - Crowd auto-runs up the lane at constant speed. Player drags left/right to move the crowd centre across the lane width. No other input.
 - Crowd rendered as N small circular units in a blob (sunflower/phyllotaxis layout so it looks organic). Cap rendering at 300 sprites; above that, scale the blob and rely on the count label.
-- Count label floats above the crowd at all times, big and bold.
+- Count label sits in a fixed bottom-centre HUD tag, big and bold, so it never overlaps gate text.
 - Gate pairs span the lane every ~3 seconds. Each gate is a translucent coloured wall with its operator text. Teal = good (+, x), red = bad (-, ÷). Touching a gate applies the operator, number flashes, pop sound. You must pass through exactly one of the pair.
 - Red enemy units stand in clumps on the lane; contact removes one of yours per one of theirs.
 - Lane ends at a BOSS with a number over its head. Crowd charges. If count > boss number, boss is knocked back in a big tumble, level clears. Otherwise you lose units until 0 and see "Try again".
@@ -42,7 +42,7 @@ Visual reference: Count Masters / Top War ads. Blue crowd, teal good gates, red 
 ## Juice
 
 - Gate pass: number flashes, units spring in from crowd centre, confetti of small squares in gate colour, medium haptic.
-- Bad gate: units pop out with a deflate sound, red flash.
+- Bad gate: units pop out with a womp + sad peep, red flash.
 - Boss hit: slow-mo 0.3x for 0.4s, screen shake 6px, boss tumbles off.
 - Win: units do a small staggered jump (15ms apart), coins fountain.
 - Lose: units fall over in waves.
@@ -59,7 +59,7 @@ Visual reference: Count Masters / Top War ads. Blue crowd, teal good gates, red 
 ## Assets
 
 - All procedural Skia. Units: circle body + smaller circle head, 2-frame bob. Gates: rounded rects at 70% opacity with bold text. Boss: bigger unit with a crown. Palette: crowd #3B82F6, good gate #14B8A6, bad gate #EF4444, enemies #EF4444, lane grey.
-- Audio synthesized offline and committed, under 400KB total.
+- Audio: CC0 sound files committed under /src/assets/audio, preloaded at boot, under 800KB total. Gate pass = pop + random quack (±10% pitch per play), bad gate = womp + sad peep, gamble = ratchet ticks then win-ding / fail-buzz, boss win = impact thud + quack chorus, boss lose = pincer snap + descending tone, coins = glassy ticks, buttons = soft click.
 
 ## Tech
 
@@ -89,8 +89,8 @@ Visual reference: Count Masters / Top War ads. Blue crowd, teal good gates, red 
 7. Ads + IAP + iOS (separate instructions later)
 
 ## Theme
-Ducklings following mama duck. The crowd is yellow ducklings; the count label sits
-over the flock. Lane is a park path with a pond feel. Boss at the end is a single
+Ducklings following mama duck. The crowd is yellow ducklings; the count label
+lives in the bottom-centre HUD tag. Lane is a park path with a pond feel. Boss at the end is a single
 giant grumpy crab (3-4x duckling scale) with a number over its head — beat it and
 it tips over backwards and slides off, ducklings celebrate; lose and it snaps its
 pincers and snatches them one by one (keep it cartoony, they pop back out on retry).

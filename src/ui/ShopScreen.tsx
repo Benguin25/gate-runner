@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { playSfx } from '../engine/sfx';
 import { CONFIG } from '../game/config';
 import {
   incomeMultiplier,
@@ -50,7 +51,10 @@ export function ShopScreen() {
       <View style={styles.header}>
         <Pressable
           style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
-          onPress={() => router.back()}
+          onPress={() => {
+            playSfx('click');
+            router.back();
+          }}
         >
           <Text style={styles.backText}>{'<'} BACK</Text>
         </Pressable>
@@ -78,7 +82,10 @@ export function ShopScreen() {
                 !affordable && styles.buyDisabled,
                 pressed && styles.pressed,
               ]}
-              onPress={() => buyUpgrade(card.id)}
+              onPress={() => {
+                playSfx('click');
+                buyUpgrade(card.id);
+              }}
             >
               <View style={styles.buyCoinDot} />
               <Text style={styles.buyText}>{cost}</Text>

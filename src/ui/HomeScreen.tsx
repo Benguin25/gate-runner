@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
+import { playSfx } from '../engine/sfx';
 import { CONFIG } from '../game/config';
 import { useProgressStore } from '../store/progressStore';
 
@@ -21,13 +22,19 @@ export function HomeScreen() {
       <Text style={styles.levelLabel}>LEVEL {level}</Text>
       <Pressable
         style={({ pressed }) => [styles.playButton, pressed && styles.pressed]}
-        onPress={() => router.push('/game')}
+        onPress={() => {
+          playSfx('click');
+          router.push('/game');
+        }}
       >
         <Text style={styles.playText}>PLAY</Text>
       </Pressable>
       <Pressable
         style={({ pressed }) => [styles.shopButton, pressed && styles.pressed]}
-        onPress={() => router.push('/shop')}
+        onPress={() => {
+          playSfx('click');
+          router.push('/shop');
+        }}
       >
         <Text style={styles.shopText}>SHOP</Text>
       </Pressable>
