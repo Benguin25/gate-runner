@@ -13,10 +13,11 @@ import { ParticleKind, shakeOffset, type FxState } from './fx';
 
 // Everything is drawn procedurally with Skia — no image assets. Called once
 // per frame from GameCanvas's picture recording on the JS thread. Paints,
-// colours and static lane geometry come from the RenderCache: at the 300-unit
+// colours and static lane geometry come from the RenderCache: at the 80-unit
 // render cap this loop is the hot path, so it makes no per-frame Skia
 // allocations beyond rects and no setColor calls with string colours. Drop
-// shadows batch into one shared path per group for the same reason.
+// shadows, outlines, bodies, beaks and eyes each batch into one shared path
+// per group for the same reason.
 
 export function drawGame(
   canvas: SkCanvas,
@@ -285,7 +286,7 @@ function drawSparkles(
   sp.setAlphaf(1);
 }
 
-/** Gate frame: two posts and a crossbar over the wall. */
+/** Gate frame: two posts and a crossbar over the wall, cartoon-outlined. */
 function drawGateFrame(
   canvas: SkCanvas,
   cache: RenderCache,
@@ -302,36 +303,31 @@ function drawGateFrame(
   const rise = V.postRisePx * scale;
   const barH = V.crossbarHeightPx * scale;
   const topY = baseY - wallH - rise;
+  const a = clamp(wallAlpha + 0.15, 0, 1);
+  const leftPost = Skia.RRectXY(
+    Skia.XYWHRect(x0 - postW / 2, topY, postW, wallH + rise),
+    postW / 2,
+    postW / 2
+  );
+  const rightPost = Skia.RRectXY(
+    Skia.XYWHRect(x0 + colW - postW / 2, topY, postW, wallH + rise),
+    postW / 2,
+    postW / 2
+  );
+  const crossbar = Skia.RRectXY(
+    Skia.XYWHRect(x0 - postW / 2, topY - barH, colW + postW, barH),
+    barH / 2,
+    barH / 2
+  );
   const frame = cache.paint('gateFrame');
-  frame.setAlphaf(clamp(wallAlpha + 0.15, 0, 1));
+  frame.setAlphaf(a);
   // Adjacent walls share their boundary post; only draw the left post for
   // the leftmost wall so shared posts aren't double-painted.
   if (leftmost) {
-    canvas.drawRRect(
-      Skia.RRectXY(
-        Skia.XYWHRect(x0 - postW / 2, topY, postW, wallH + rise),
-        postW / 2,
-        postW / 2
-      ),
-      frame
-    );
+    canvas.drawRRect(leftPost, frame);
   }
-  canvas.drawRRect(
-    Skia.RRectXY(
-      Skia.XYWHRect(x0 + colW - postW / 2, topY, postW, wallH + rise),
-      postW / 2,
-      postW / 2
-    ),
-    frame
-  );
-  canvas.drawRRect(
-    Skia.RRectXY(
-      Skia.XYWHRect(x0 - postW / 2, topY - barH, colW + postW, barH),
-      barH / 2,
-      barH / 2
-    ),
-    frame
-  );
+  canvas.drawRRect(rightPost, frame);
+  canvas.drawRRect(crossbar, frame);
   frame.setAlphaf(1);
   // A thin shade line under the crossbar sells the slight 3D.
   const shade = cache.paint('gateFrameShade');
@@ -341,6 +337,16 @@ function drawGateFrame(
     shade
   );
   shade.setAlphaf(1);
+  // Thick dark outline around the frame pieces.
+  const outline = cache.strokePaint('outline');
+  outline.setStrokeWidth(V.outlinePx * scale);
+  outline.setAlphaf(a);
+  if (leftmost) {
+    canvas.drawRRect(leftPost, outline);
+  }
+  canvas.drawRRect(rightPost, outline);
+  canvas.drawRRect(crossbar, outline);
+  outline.setAlphaf(1);
 }
 
 function drawEnemies(
@@ -355,10 +361,6 @@ function drawEnemies(
 ): void {
   const E = CONFIG.enemies;
   const V = CONFIG.visual;
-  const body = cache.paint('enemy');
-  const claw = cache.paint('crabClaw');
-  const eye = cache.paint('crabEye');
-  const pupil = cache.paint('crabPupil');
   for (let i = s.enemies.length - 1; i >= 0; i--) {
     const e = s.enemies[i];
     const dz = e.z - dist;
@@ -369,6 +371,7 @@ function drawEnemies(
     const ex = cx + e.x * proj.halfW;
     const n = Math.min(e.count, E.renderCap);
     const r = E.unitRadiusPx * proj.scale;
+    const ow = V.outlinePx * proj.scale;
 
     // Soft drop shadows first, batched into one flattened-circle path.
     drawShadowBatch(canvas, cache, (path, k) => {
@@ -379,25 +382,47 @@ function drawEnemies(
       }
     });
 
-    // Grumpy crabs: flat red body, raised pincers, glaring eye stalks.
+    // Grumpy crabs: red body, big googly eyes, open pincers, all ringed by
+    // the thick cartoon outline. Each part batches into one path per clump.
+    const outlineP = cache.scratchPath(0);
+    const clawP = cache.scratchPath(1);
+    const notchP = cache.scratchPath(2);
+    const bodyP = cache.scratchPath(3);
+    const eyeP = cache.scratchPath(4);
+    const pupilP = cache.scratchPath(5);
     for (let j = 0; j < n; j++) {
       const px = ex + slotX(j, E.slotSpacingPx) * proj.scale;
       const py = proj.y + slotY(j, E.slotSpacingPx) * proj.scale;
       const clawR = r * V.crabClawFrac;
-      canvas.drawCircle(px - r * V.crabClawOutFrac, py - r * V.crabClawUpFrac, clawR, claw);
-      canvas.drawCircle(px + r * V.crabClawOutFrac, py - r * V.crabClawUpFrac, clawR, claw);
+      const clawY = py - r * V.crabClawUpFrac;
       const rw = r * V.crabBodyWidthFrac;
       const rh = r * V.crabBodyHeightFrac;
-      canvas.drawOval(Skia.XYWHRect(px - rw, py - rh, rw * 2, rh * 2), body);
       const eyeR = r * V.crabEyeFrac;
       const eyeY = py - r * V.crabEyeUpFrac;
-      canvas.drawCircle(px - r * V.crabEyeOutFrac, eyeY, eyeR, eye);
-      canvas.drawCircle(px + r * V.crabEyeOutFrac, eyeY, eyeR, eye);
-      // Pupils sit low and inward for the hostile glare.
       const pupilR = r * V.crabPupilFrac;
-      canvas.drawCircle(px - r * V.crabEyeOutFrac * 0.8, eyeY + eyeR * 0.25, pupilR, pupil);
-      canvas.drawCircle(px + r * V.crabEyeOutFrac * 0.8, eyeY + eyeR * 0.25, pupilR, pupil);
+      for (let side = -1; side <= 1; side += 2) {
+        const clawX = px + side * r * V.crabClawOutFrac;
+        outlineP.addCircle(clawX, clawY, clawR + ow);
+        outlineP.addCircle(px + side * r * V.crabEyeOutFrac, eyeY, eyeR + ow);
+        clawP.addCircle(clawX, clawY, clawR);
+        // Open pincer: a V wedge cut into the claw's outer-top edge.
+        notchP.moveTo(clawX, clawY);
+        notchP.lineTo(clawX + side * clawR * 1.15, clawY - clawR * 0.85);
+        notchP.lineTo(clawX + side * clawR * 1.25, clawY - clawR * 0.1);
+        notchP.close();
+        eyeP.addCircle(px + side * r * V.crabEyeOutFrac, eyeY, eyeR);
+        // Pupils sit low and inward for the hostile glare.
+        pupilP.addCircle(px + side * r * V.crabEyeOutFrac * 0.8, eyeY + eyeR * 0.3, pupilR);
+      }
+      outlineP.addOval(Skia.XYWHRect(px - rw - ow, py - rh - ow, (rw + ow) * 2, (rh + ow) * 2));
+      bodyP.addOval(Skia.XYWHRect(px - rw, py - rh, rw * 2, rh * 2));
     }
+    canvas.drawPath(outlineP, cache.paint('outline'));
+    canvas.drawPath(clawP, cache.paint('crabClaw'));
+    canvas.drawPath(notchP, cache.paint('outline'));
+    canvas.drawPath(bodyP, cache.paint('enemy'));
+    canvas.drawPath(eyeP, cache.paint('crabEye'));
+    canvas.drawPath(pupilP, cache.paint('crabPupil'));
 
     // Count in a small red pill badge above the clump.
     const clumpR = blobRadiusPx(n, E.slotSpacingPx) * proj.scale;
@@ -447,48 +472,120 @@ function drawBoss(
     return;
   }
   const proj = projectDepth(dz, w, h);
-  // knockT doubles as the win animation clock: mama caps the drain.
+  // knockT doubles as the win animation clock: the crab tips over backwards
+  // and slides off toward the horizon.
   const kt = s.boss.knockT;
-  // Suction pulse while ducklings are being pulled in.
   const losing = s.phase === 'boss' && s.count <= s.boss.count && s.count > 0;
-  const pulse = losing
-    ? 1 + Math.abs(Math.sin(s.time * Math.PI * 2 * B.pulseHz)) * B.pulseScale
-    : 1;
-
   const R = B.bodyRadiusPx;
+  const ow = V.outlinePx;
+
+  // Pincer snap: a quick pulse at the start of every snap period. While the
+  // crowd is losing he snaps much faster.
+  const period = losing ? B.snapLosePeriodSec : B.snapPeriodSec;
+  const snapPhase = (s.time % period) / B.snapSec;
+  const snap = snapPhase < 1 ? Math.sin(snapPhase * Math.PI) : 0;
+
   canvas.save();
   canvas.translate(cx, proj.y);
-  // The grate lies on the path: flattened by the fake perspective.
-  canvas.scale(proj.scale * pulse, proj.scale * B.drainFlatten * pulse);
-  // Soft shadow pooling under the grate.
-  const shadow = cache.paint('shadow');
-  shadow.setAlphaf(V.bossShadowAlpha);
-  canvas.drawCircle(0, R * 0.1, R * V.bossShadowScale, shadow);
-  shadow.setAlphaf(1);
-  canvas.drawCircle(0, 0, R, cache.paint('drainRim'));
-  canvas.drawCircle(0, 0, R * (1 - B.rimFrac), cache.paint('drain'));
-  canvas.drawPath(cache.drainSlotsPath(), cache.paint('drainSlot'));
-  // Slow inward swirl: spiral arms rotating over the grate.
-  canvas.save();
-  canvas.rotate((s.time * V.swirlRadPerSec * 180) / Math.PI, 0, 0);
-  const swirl = cache.strokePaint('drainSwirl');
-  swirl.setStrokeWidth(V.swirlStrokePx);
-  swirl.setAlphaf(V.swirlAlpha);
-  canvas.drawPath(cache.swirlPath(), swirl);
-  swirl.setAlphaf(1);
-  canvas.restore();
-  if (kt > 0) {
-    // Win: the cover slides in from the crowd side and seats with an ease-out.
-    const slide = 1 - (1 - kt) * (1 - kt);
-    canvas.drawCircle(0, (1 - slide) * R * 3.5, R * (1 - B.rimFrac * 0.4), cache.paint('drainCap'));
+  canvas.scale(proj.scale, proj.scale);
+  // Soft shadow pooling under the crab; fades as he tips off.
+  if (kt < 0.6) {
+    const shadow = cache.paint('shadow');
+    shadow.setAlphaf(V.bossShadowAlpha * (1 - kt / 0.6));
+    canvas.save();
+    canvas.scale(1, 0.35);
+    canvas.drawCircle(0, 0, R * V.bossShadowScale, shadow);
+    canvas.restore();
+    shadow.setAlphaf(1);
   }
+  if (kt > 0) {
+    // Win: tip over backwards (pivot at the ground row) and slide off.
+    const ease = kt * kt;
+    canvas.translate(0, -ease * R * B.slideOffFrac);
+    canvas.rotate((-kt * B.tipRad * 180) / Math.PI, 0, 0);
+  } else {
+    // Idle menace: a slow rocking sway about the ground contact.
+    canvas.rotate(
+      (Math.sin(s.time * Math.PI * 2 * B.swayHz) * B.swayRad * 180) / Math.PI,
+      0,
+      0
+    );
+  }
+  // Local origin at the body centre, lifted off the ground row.
+  canvas.translate(0, -R * 0.55);
+
+  const bw = R * B.bodyWidthFrac;
+  const bh = R * B.bodyHeightFrac;
+  const clawR = R * B.clawRadiusFrac;
+  const clawUp = R * B.clawUpFrac + snap * R * B.snapLiftFrac;
+  const clawOut = R * B.clawOutFrac - snap * R * 0.08;
+  const shoulderR = R * B.shoulderRadiusFrac;
+  const eyeR = R * B.eyeRadiusFrac;
+  const pupilR = R * B.pupilFrac;
+
+  // Thick dark outline under everything: one batched silhouette path.
+  const outlineP = cache.scratchPath(0);
+  for (let side = -1; side <= 1; side += 2) {
+    outlineP.addCircle(side * clawOut, -clawUp, clawR + ow);
+    outlineP.addCircle(side * R * B.shoulderOutFrac, -R * B.shoulderUpFrac, shoulderR + ow);
+    outlineP.addCircle(side * R * B.eyeOutFrac, -R * B.eyeUpFrac, eyeR + ow);
+  }
+  outlineP.addOval(Skia.XYWHRect(-bw - ow, -bh - ow, (bw + ow) * 2, (bh + ow) * 2));
+  canvas.drawPath(outlineP, cache.paint('outline'));
+
+  // Shoulders and raised pincers, then the pincer notches (they close with a
+  // snap: the wedge narrows to nothing at the snap peak).
+  const bossClaw = cache.paint('bossClaw');
+  const notchP = cache.scratchPath(1);
+  const notch = 1 - 0.8 * snap;
+  for (let side = -1; side <= 1; side += 2) {
+    canvas.drawCircle(side * R * B.shoulderOutFrac, -R * B.shoulderUpFrac, shoulderR, bossClaw);
+    canvas.drawCircle(side * clawOut, -clawUp, clawR, bossClaw);
+    notchP.moveTo(side * clawOut, -clawUp);
+    notchP.lineTo(side * (clawOut + clawR * 1.15), -clawUp - clawR * 0.85 * notch);
+    notchP.lineTo(side * (clawOut + clawR * 1.25), -clawUp - clawR * 0.1);
+    notchP.close();
+  }
+  canvas.drawPath(notchP, cache.paint('outline'));
+
+  canvas.drawOval(Skia.XYWHRect(-bw, -bh, bw * 2, bh * 2), cache.paint('bossBody'));
+
+  // Big googly eyes straddling the top of the shell, pupils glaring down.
+  const eye = cache.paint('crabEye');
+  const pupil = cache.paint('crabPupil');
+  for (let side = -1; side <= 1; side += 2) {
+    const ex = side * R * B.eyeOutFrac;
+    const ey = -R * B.eyeUpFrac;
+    canvas.drawCircle(ex, ey, eyeR, eye);
+    canvas.drawCircle(ex - side * eyeR * 0.22, ey + eyeR * 0.28, pupilR, pupil);
+  }
+
+  // Angry brows slanting in over the eyes, and a grumpy frown.
+  const stroke = cache.strokePaint('outline');
+  stroke.setStrokeWidth(R * B.browStrokeFrac);
+  for (let side = -1; side <= 1; side += 2) {
+    canvas.drawLine(
+      side * R * 0.16,
+      -R * (B.eyeUpFrac + B.eyeRadiusFrac * 0.55),
+      side * R * 0.68,
+      -R * (B.eyeUpFrac + B.eyeRadiusFrac * 1.35),
+      stroke
+    );
+  }
+  stroke.setStrokeWidth(R * B.mouthStrokeFrac);
+  const frown = cache.scratchPath(2);
+  frown.moveTo(-R * 0.24, -R * 0.24);
+  frown.lineTo(0, -R * 0.34);
+  frown.lineTo(R * 0.24, -R * 0.24);
+  canvas.drawPath(frown, stroke);
+
   canvas.restore();
 
-  // The number over the drain — the biggest text on screen, in a big badge —
-  // until the cap covers it.
+  // The number over the crab — the biggest text on screen, in a big badge —
+  // until he starts tipping.
   if (kt < 0.2) {
     canvas.save();
-    canvas.translate(cx, proj.y - (R * B.drainFlatten + B.numberGapPx) * proj.scale);
+    canvas.translate(cx, proj.y - (R * B.badgeUpFrac + B.numberGapPx) * proj.scale);
     canvas.scale(proj.scale, proj.scale);
     const text = `${s.boss.count}`;
     const halfW = cache.textWidth(font, text) / 2 + V.badgePadXPx;
@@ -556,11 +653,10 @@ function drawCrowd(
 
   const won = s.phase === 'won';
   const lost = s.phase === 'lost';
-  const body = cache.paint('crowd');
-  const head = cache.paint('crowdHead');
   const unitR = K.unitRadiusPx * bs;
   const headDist = unitR * 0.9;
   const headR = unitR * K.headRadiusFrac;
+  const ow = V.outlinePx * bs;
 
   // Mama's resting spot, needed up front so her shadow batches with the flock.
   const blobR = blobRadiusPx(s.unitsActive, K.slotSpacingPx) * bs;
@@ -573,9 +669,13 @@ function drawCrowd(
   drawShadowBatch(canvas, cache, (path, k) => {
     for (let i = 0; i < s.unitsActive; i++) {
       const u = s.units[i];
+      const trail =
+        hash01(i * 23 + 3) < K.trailChance
+          ? (0.35 + 0.65 * hash01(i * 23 + 4)) * K.trailMaxPx * bs
+          : 0;
       path.addCircle(
         sx + u.x * scaleX,
-        (sy + u.y * scaleY + unitR * V.shadowDropFrac) / k,
+        (sy + u.y * scaleY + trail + unitR * V.shadowDropFrac) / k,
         unitR * V.shadowWidthFrac
       );
     }
@@ -586,8 +686,13 @@ function drawCrowd(
     );
   });
 
-  // All beaks batch into one shared path — one draw call, no allocations.
-  const beaks = cache.scratchPath();
+  // Every duckling part batches into one path per layer — dark outline
+  // silhouettes, bodies, heads, beaks, eyes: five draw calls for the flock.
+  const outlineP = cache.scratchPath(0);
+  const bodiesP = cache.scratchPath(1);
+  const headsP = cache.scratchPath(2);
+  const beaksP = cache.scratchPath(3);
+  const eyesP = cache.scratchPath(4);
   // 2-frame waddle clock, shared by the flock; each duckling alternates phase.
   const waddleFrame = Math.floor(s.time * K.waddleFramesPerSec);
 
@@ -599,9 +704,12 @@ function drawCrowd(
     const rock = (frame ? 1 : -1) * (i & 1 ? 1 : -1) * K.waddleRockPx;
     const px = sx + u.x * scaleX + rock;
     let py = sy + u.y * scaleY;
-    // Head offset from the body centre; tips sideways as a lost duckling falls.
-    let hx = 0;
-    let hy = -headDist;
+    // A few ducklings trail behind their slot so the flock shape reads organic.
+    if (hash01(i * 23 + 3) < K.trailChance) {
+      py += (0.35 + 0.65 * hash01(i * 23 + 4)) * K.trailMaxPx * bs;
+    }
+    // Each duckling leans by a stable random tilt; a lost one falls sideways.
+    let ang = (hash01(i * 31 + 9) - 0.5) * 2 * K.tiltMaxRad;
 
     if (won) {
       // Staggered victory hop rippling through the flock.
@@ -615,29 +723,38 @@ function drawCrowd(
       const t = clamp((fx.phaseTime - r / J.loseWaveSpeedPx) / J.loseFallSec, 0, 1);
       if (t > 0) {
         bob *= 1 - t;
-        const angle = t * (Math.PI / 2);
-        const dir = u.x >= 0 ? 1 : -1;
-        hx = Math.sin(angle) * dir * headDist;
-        hy = -Math.cos(angle) * headDist;
+        ang += (u.x >= 0 ? 1 : -1) * t * (Math.PI / 2);
         py += t * unitR * 0.5;
       }
     }
-
     py += bob;
-    canvas.drawCircle(px, py, unitR, body);
-    canvas.drawCircle(px + hx, py + hy, headR, head);
-    addBeak(beaks, px + hx, py + hy, headR);
-  }
 
-  // Mama duck leads the flock: bigger, white, just ahead of the blob's front
-  // edge, waddling on the same 2-frame clock.
+    const dirX = Math.sin(ang);
+    const dirY = -Math.cos(ang);
+    const hpx = px + dirX * headDist;
+    const hpy = py + dirY * headDist;
+    outlineP.addCircle(px, py, unitR + ow);
+    outlineP.addCircle(hpx, hpy, headR + ow);
+    addBeak(outlineP, hpx, hpy, headR, dirX, dirY, ow);
+    bodiesP.addCircle(px, py, unitR);
+    headsP.addCircle(hpx, hpy, headR);
+    addBeak(beaksP, hpx, hpy, headR, dirX, dirY, 0);
+    addEyes(eyesP, hpx, hpy, headR, dirX, dirY);
+  }
+  canvas.drawPath(outlineP, cache.paint('outline'));
+  canvas.drawPath(bodiesP, cache.paint('crowd'));
+  canvas.drawPath(headsP, cache.paint('crowdHead'));
+  canvas.drawPath(beaksP, cache.paint('beak'));
+  canvas.drawPath(eyesP, cache.paint('outline'));
+
+  // Mama duck leads the flock: bigger, white, sternly browed, just ahead of
+  // the blob's front edge, waddling on the same 2-frame clock. Drawn on top.
   {
     const frame = waddleFrame & 1;
     let my = mamaBaseY;
     let bob = frame ? -K.bobAmplitudePx : 0;
     const mx = sx + (frame ? 1 : -1) * K.waddleRockPx;
-    let hx = 0;
-    let hy = -mamaR * 0.9;
+    let ang = 0;
     if (won) {
       const t = fx.phaseTime / J.winJumpSec;
       if (t > 0 && t < 1) {
@@ -648,18 +765,43 @@ function drawCrowd(
       const t = clamp((fx.phaseTime - frontR / J.loseWaveSpeedPx) / J.loseFallSec, 0, 1);
       if (t > 0) {
         bob *= 1 - t;
-        const angle = t * (Math.PI / 2);
-        hx = Math.sin(angle) * mamaR * 0.9;
-        hy = -Math.cos(angle) * mamaR * 0.9;
+        ang = t * (Math.PI / 2);
         my += t * mamaR * 0.5;
       }
     }
     my += bob;
+    const dirX = Math.sin(ang);
+    const dirY = -Math.cos(ang);
+    const mhx = mx + dirX * mamaR * 0.9;
+    const mhy = my + dirY * mamaR * 0.9;
+    const mamaOutline = cache.scratchPath(0);
+    mamaOutline.addCircle(mx, my, mamaR + ow);
+    mamaOutline.addCircle(mhx, mhy, mamaHeadR + ow);
+    addBeak(mamaOutline, mhx, mhy, mamaHeadR, dirX, dirY, ow);
+    canvas.drawPath(mamaOutline, cache.paint('outline'));
     canvas.drawCircle(mx, my, mamaR, cache.paint('mama'));
-    canvas.drawCircle(mx + hx, my + hy, mamaHeadR, cache.paint('mamaHead'));
-    addBeak(beaks, mx + hx, my + hy, mamaHeadR);
+    canvas.drawCircle(mhx, mhy, mamaHeadR, cache.paint('mamaHead'));
+    const mamaBeak = cache.scratchPath(1);
+    addBeak(mamaBeak, mhx, mhy, mamaHeadR, dirX, dirY, 0);
+    canvas.drawPath(mamaBeak, cache.paint('beak'));
+    const mamaEyes = cache.scratchPath(2);
+    addEyes(mamaEyes, mhx, mhy, mamaHeadR, dirX, dirY);
+    canvas.drawPath(mamaEyes, cache.paint('outline'));
+    // Mama's visible brow: two strokes slanting in over the eyes.
+    const brow = cache.strokePaint('outline');
+    brow.setStrokeWidth(mamaHeadR * K.browStrokeFrac);
+    const perpX = -dirY;
+    const perpY = dirX;
+    for (let side = -1; side <= 1; side += 2) {
+      canvas.drawLine(
+        mhx + side * perpX * mamaHeadR * K.browInFrac + dirX * mamaHeadR * K.browInUpFrac,
+        mhy + side * perpY * mamaHeadR * K.browInFrac + dirY * mamaHeadR * K.browInUpFrac,
+        mhx + side * perpX * mamaHeadR * K.browOutFrac + dirX * mamaHeadR * K.browOutUpFrac,
+        mhy + side * perpY * mamaHeadR * K.browOutFrac + dirY * mamaHeadR * K.browOutUpFrac,
+        brow
+      );
+    }
   }
-  canvas.drawPath(beaks, cache.paint('beak'));
 
   if (s.count > 0 || fx.gambleSpinT > 0) {
     // The label clears the flock and mama.
@@ -699,16 +841,50 @@ function drawCrowd(
   }
 }
 
-/** Append one up-pointing orange beak triangle at a duck head position. */
-function addBeak(path: SkPath, hx: number, hy: number, headR: number): void {
+/**
+ * Append one orange beak triangle pointing the way a duck head faces.
+ * `dir` is the head's unit facing vector; `grow` pads the triangle so the
+ * same helper builds the dark outline silhouette under the fill.
+ */
+function addBeak(
+  path: SkPath,
+  hx: number,
+  hy: number,
+  headR: number,
+  dirX: number,
+  dirY: number,
+  grow: number
+): void {
   const K = CONFIG.crowd;
-  const halfW = headR * K.beakHalfWidthFrac;
-  const len = headR * K.beakLengthFrac;
-  const baseY = hy - headR * 0.5;
-  path.moveTo(hx - halfW, baseY);
-  path.lineTo(hx + halfW, baseY);
-  path.lineTo(hx, baseY - len);
+  const halfW = headR * K.beakHalfWidthFrac + grow;
+  const len = headR * K.beakLengthFrac + grow * 2;
+  const bx = hx + dirX * headR * 0.5;
+  const by = hy + dirY * headR * 0.5;
+  const perpX = -dirY;
+  const perpY = dirX;
+  path.moveTo(bx - perpX * halfW, by - perpY * halfW);
+  path.lineTo(bx + perpX * halfW, by + perpY * halfW);
+  path.lineTo(bx + dirX * len, by + dirY * len);
   path.close();
+}
+
+/** Append the two black eyes on the upper sides of a duck head. */
+function addEyes(
+  path: SkPath,
+  hx: number,
+  hy: number,
+  headR: number,
+  dirX: number,
+  dirY: number
+): void {
+  const K = CONFIG.crowd;
+  const upX = dirX * headR * K.eyeUpFrac;
+  const upY = dirY * headR * K.eyeUpFrac;
+  const outX = -dirY * headR * K.eyeOutFrac;
+  const outY = dirX * headR * K.eyeOutFrac;
+  const r = headR * K.eyeRadiusFrac;
+  path.addCircle(hx + upX + outX, hy + upY + outY, r);
+  path.addCircle(hx + upX - outX, hy + upY - outY, r);
 }
 
 /**
@@ -759,18 +935,37 @@ function drawParticles(canvas: SkCanvas, fx: FxState, cache: RenderCache): void 
       paint.setAlphaf(a);
       canvas.drawCircle(p.x, p.y, J.coinRadiusPx, paint);
     } else if (p.kind === ParticleKind.Drained) {
-      // A duckling being pulled into the drain, shrinking as it goes.
+      // A duckling snatched away toward the boss, shrinking as it goes.
+      const r = K.unitRadiusPx * (0.3 + 0.7 * (p.life / p.life0));
+      drawOutlinedDot(canvas, cache, p.x, p.y, r, a);
       paint = cache.paint('crowd');
-      paint.setAlphaf(a);
-      canvas.drawCircle(p.x, p.y, K.unitRadiusPx * (0.3 + 0.7 * (p.life / p.life0)), paint);
     } else {
       // A popped-out duckling shrinking as it flies.
+      const r = K.unitRadiusPx * (0.5 + 0.5 * (p.life / p.life0));
+      drawOutlinedDot(canvas, cache, p.x, p.y, r, a);
       paint = cache.paint('crowd');
-      paint.setAlphaf(a);
-      canvas.drawCircle(p.x, p.y, K.unitRadiusPx * (0.5 + 0.5 * (p.life / p.life0)), paint);
     }
     paint.setAlphaf(1);
   }
+}
+
+/** A flying duckling dot: outlined yellow circle, used by particles. */
+function drawOutlinedDot(
+  canvas: SkCanvas,
+  cache: RenderCache,
+  x: number,
+  y: number,
+  r: number,
+  alpha: number
+): void {
+  const outline = cache.paint('outline');
+  outline.setAlphaf(alpha);
+  canvas.drawCircle(x, y, r + CONFIG.visual.outlinePx * 0.7, outline);
+  outline.setAlphaf(1);
+  const fill = cache.paint('crowd');
+  fill.setAlphaf(alpha);
+  canvas.drawCircle(x, y, r, fill);
+  fill.setAlphaf(1);
 }
 
 function drawCenteredText(

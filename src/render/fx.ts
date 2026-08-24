@@ -14,7 +14,7 @@ export const ParticleKind = {
   Confetti: 0,
   Coin: 1,
   Unit: 2,
-  /** A duckling being pulled into the storm drain: no gravity, shrinks away. */
+  /** A duckling snatched away by the boss crab: no gravity, shrinks away. */
   Drained: 3,
 } as const;
 export type ParticleKind = (typeof ParticleKind)[keyof typeof ParticleKind];
@@ -162,11 +162,11 @@ function popUnits(fx: FxState, n: number, x: number, y: number): void {
   }
 }
 
-/** Ducklings pulled from the flock into the drain: straight homing flights. */
+/** Ducklings snatched from the flock by the boss: straight homing flights. */
 function pullDucklings(fx: FxState, n: number, s: SimState, w: number, h: number): void {
   const J = CONFIG.juice;
   const from = crowdScreenPos(s, w, h);
-  const drain = projectDepth(s.boss.z - s.distance, w, h);
+  const boss = projectDepth(s.boss.z - s.distance, w, h);
   for (let i = 0; i < n; i++) {
     const p = spawn(fx);
     if (!p) {
@@ -179,7 +179,7 @@ function pullDucklings(fx: FxState, n: number, s: SimState, w: number, h: number
     p.x = x;
     p.y = y;
     p.vx = (w / 2 - x) / life;
-    p.vy = (drain.y - y) / life;
+    p.vy = (boss.y - y) / life;
     p.rot = 0;
     p.vrot = rand(-8, 8);
     p.life0 = life;
@@ -316,7 +316,7 @@ export function updateFx(fx: FxState, dt: number, s: SimState, w: number, h: num
         : p.kind === ParticleKind.Coin
           ? J.coinGravityPx
           : p.kind === ParticleKind.Drained
-            ? 0 // Homing straight into the drain; gravity would miss it.
+            ? 0 // Homing straight at the boss; gravity would miss it.
             : J.popUnitGravityPx;
     p.vy += g * scaled;
     p.x += p.vx * scaled;

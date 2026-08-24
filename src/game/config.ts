@@ -13,20 +13,23 @@ export const CONFIG = {
   },
 
   lane: {
-    // Half-width of the lane at the crowd row / at the horizon, as a fraction of screen width.
-    bottomHalfWidthFrac: 0.42,
-    topHalfWidthFrac: 0.14,
+    // Half-width of the lane at the crowd row / at the horizon, as a fraction
+    // of screen width. Camera sits low and close: the lane fills most of the
+    // screen width and the flock dominates the frame.
+    bottomHalfWidthFrac: 0.47,
+    topHalfWidthFrac: 0.2,
     // Screen-y anchors as fractions of screen height.
-    horizonYFrac: 0.16,
-    crowdYFrac: 0.78,
+    horizonYFrac: 0.24,
+    crowdYFrac: 0.8,
     // Depth constant for the fake-perspective mapping p = dz / (dz + depth).
-    perspectiveDepth: 14,
+    // Smaller = closer camera: far objects (the boss) stay bigger on screen.
+    perspectiveDepth: 11,
     // Stop drawing objects closer to the horizon than this projected fraction.
     cullFar: 0.96,
     // Stop drawing objects this far behind the crowd (world units).
     cullBehind: -4,
     // Sprite scale at the horizon (1 at the crowd row).
-    minScale: 0.3,
+    minScale: 0.38,
     // Distance between the moving cross-lane stripes (world units).
     stripeSpacing: 6,
     stripeAlpha: 0.16,
@@ -46,28 +49,44 @@ export const CONFIG = {
   crowd: {
     startCount: 10,
     // Never render more than this many units; beyond it the blob scales up
-    // and the count label carries the information.
-    renderCap: 300,
-    unitRadiusPx: 7,
-    headRadiusFrac: 0.55,
-    // Phyllotaxis slot spacing (px at scale 1).
-    slotSpacingPx: 10.5,
+    // and the count label carries the information. Kept low so each duckling
+    // is big enough to read as an individual (Count Masters style).
+    renderCap: 80,
+    unitRadiusPx: 9.5,
+    headRadiusFrac: 0.58,
+    // Phyllotaxis slot spacing (px at scale 1). Loose, so ducklings separate.
+    slotSpacingPx: 17,
     // Blob is flattened vertically to match the fake perspective.
     ellipseFlatten: 0.55,
     // How fast rendered units chase their formation slots (1/sec).
     slotLerp: 10,
     // Ducklings do a 2-frame waddle: the bob snaps between two poses at this
     // rate (frames/sec) with a small sideways rock on alternate frames.
-    bobAmplitudePx: 1.6,
+    bobAmplitudePx: 2.2,
     bobFrequency: 9,
     waddleFramesPerSec: 7,
-    waddleRockPx: 1.1,
+    waddleRockPx: 1.6,
     // Beak: orange triangle on the head, pointing up the lane.
     beakHalfWidthFrac: 0.5,
     beakLengthFrac: 0.9,
+    // Each duckling leans a random amount so the flock never looks stamped.
+    tiltMaxRad: 0.3,
+    // Two black eyes on the upper sides of the head (fracs of head radius).
+    eyeRadiusFrac: 0.2,
+    eyeOutFrac: 0.48,
+    eyeUpFrac: 0.3,
+    // A few ducklings lag behind their slot for an organic flock shape.
+    trailChance: 0.15,
+    trailMaxPx: 8,
     // Mama duck leads the flock: bigger, white, this far ahead of the blob edge.
-    mamaScale: 1.65,
-    mamaGapPx: 6,
+    mamaScale: 1.6,
+    mamaGapPx: 8,
+    // Mama's stern brow: line endpoints and thickness as fracs of head radius.
+    browInFrac: 0.14,
+    browOutFrac: 0.78,
+    browInUpFrac: 0.48,
+    browOutUpFrac: 0.75,
+    browStrokeFrac: 0.2,
     labelFontSize: 42,
     labelGapPx: 22,
   },
@@ -92,11 +111,11 @@ export const CONFIG = {
   },
 
   enemies: {
-    unitRadiusPx: 6,
-    slotSpacingPx: 9,
+    unitRadiusPx: 7.5,
+    slotSpacingPx: 11,
     // Render-only cap per clump; the pill badge carries the real count.
-    // Crabs cost several draws each, so this stays modest for 60fps.
-    renderCap: 28,
+    // Outlined crabs cost several draws each, so this stays modest for 60fps.
+    renderCap: 22,
     // Crowd centre must be within this normalized-x distance of the clump
     // centre when crossing its row to make contact.
     hitWindowX: 0.38,
@@ -104,27 +123,44 @@ export const CONFIG = {
   },
 
   boss: {
-    // The boss is the storm drain at the end of the path. The fight starts
-    // when the crowd gets this close (world units).
+    // The boss is a single giant grumpy crab at the end of the path. The
+    // fight starts when the crowd gets this close (world units).
     contactDistance: 2.5,
-    // Purely visual size: the drain spans a good chunk of the lane width.
-    bodyRadiusPx: 46,
-    // Grate look: rim thickness and horizontal slot bars as fractions of the
-    // body radius, flattened to lie on the path.
-    rimFrac: 0.14,
-    slotCount: 4,
-    slotWidthFrac: 1.3,
-    slotHeightFrac: 0.14,
-    drainFlatten: 0.62,
-    // Suction pulse while a losing crowd is being pulled in.
-    pulseScale: 0.05,
-    pulseHz: 2.2,
+    // Purely visual base radius; the crab reads at 3-4x duckling scale.
+    bodyRadiusPx: 42,
+    // Crab anatomy, all as fractions of bodyRadiusPx. "Up" means -y.
+    bodyWidthFrac: 1.2,
+    bodyHeightFrac: 0.85,
+    clawRadiusFrac: 0.5,
+    clawOutFrac: 1.2,
+    clawUpFrac: 0.85,
+    shoulderRadiusFrac: 0.28,
+    shoulderOutFrac: 0.88,
+    shoulderUpFrac: 0.42,
+    eyeRadiusFrac: 0.3,
+    eyeOutFrac: 0.44,
+    eyeUpFrac: 0.82,
+    pupilFrac: 0.14,
+    browStrokeFrac: 0.13,
+    mouthStrokeFrac: 0.08,
+    // Idle menace: slight body sway plus a pincer snap every snapPeriodSec.
+    swayHz: 0.45,
+    swayRad: 0.055,
+    snapPeriodSec: 2,
+    // While the crowd is losing he snaps much faster.
+    snapLosePeriodSec: 0.55,
+    snapSec: 0.25,
+    snapLiftFrac: 0.18,
+    // Win: he tips over backwards and slides off over knockbackSec.
+    tipRad: 2,
+    slideOffFrac: 3.2,
     // Top of the text hierarchy: boss > player count > gates > enemy pills.
     numberFontSize: 50,
-    numberGapPx: 30,
-    // Losing crowds get pulled into the drain at this many ducklings per second.
+    numberGapPx: 26,
+    // Number badge floats this many body radii above the crab's base row.
+    badgeUpFrac: 1.75,
+    // Losing crowds get snatched at this many ducklings per second.
     drainPerSec: 25,
-    // Win: mama caps the drain — the cover slides on over this long.
     knockbackSec: 0.9,
   },
 
@@ -274,8 +310,8 @@ export const CONFIG = {
     gambleTickHz: 14,
     gambleLandPopScale: 1.9,
 
-    // Losing to the drain: ducklings get pulled in one by one — small yellow
-    // particles fly from the flock into the grate over this long.
+    // Losing to the boss: ducklings get snatched one by one — small yellow
+    // particles fly from the flock to the crab over this long.
     drainPullSec: 0.4,
     drainPullMaxPerTick: 2,
 
@@ -352,15 +388,16 @@ export const CONFIG = {
     // Sky: vertical gradient from skyTop down to a warm skyHorizon band; the
     // gradient reaches this far past the horizon line so the warmth pools there.
     skyBandFrac: 1.1,
-    // Soft clouds drifting across the sky band (screen-height fracs).
+    // Clouds: 2-3 simple wide lozenges drifting across the sky band.
     cloudCount: 3,
-    cloudMinRadiusPx: 22,
-    cloudMaxRadiusPx: 38,
+    cloudMinWidthPx: 70,
+    cloudMaxWidthPx: 120,
+    cloudHeightFrac: 0.3,
     cloudSpeedMinPx: 5,
     cloudSpeedMaxPx: 12,
-    cloudAlpha: 0.8,
-    cloudBandTopFrac: 0.02,
-    cloudBandBottomFrac: 0.11,
+    cloudAlpha: 0.92,
+    cloudBandTopFrac: 0.04,
+    cloudBandBottomFrac: 0.16,
 
     // Pond strip hugging the left screen edge (widths as screen fracs at the
     // bottom / at the horizon). Lilypads scroll with the lane and bob.
@@ -406,6 +443,10 @@ export const CONFIG = {
     moteBobHz: 0.4,
     moteEdgeInsetPx: 12,
 
+    // Thick dark cartoon outline around every entity (px at scale 1; scales
+    // with perspective / blob scale where the entity does).
+    outlinePx: 2.5,
+
     // Soft ellipse drop shadows (per-unit ellipse as fracs of body radius).
     shadowAlpha: 0.15,
     shadowWidthFrac: 1.25,
@@ -440,31 +481,27 @@ export const CONFIG = {
     sparkleMinPx: 2,
     sparkleMaxPx: 4,
 
-    // Crab enemies (all fracs of the enemy unit radius).
-    crabBodyWidthFrac: 1.25,
-    crabBodyHeightFrac: 0.8,
-    crabClawFrac: 0.5,
-    crabClawOutFrac: 1.35,
-    crabClawUpFrac: 0.55,
-    crabEyeOutFrac: 0.45,
-    crabEyeUpFrac: 0.85,
-    crabEyeFrac: 0.3,
-    crabPupilFrac: 0.16,
+    // Crab enemies (all fracs of the enemy unit radius): big googly eyes on
+    // top, visible open pincers out to the sides.
+    crabBodyWidthFrac: 1.3,
+    crabBodyHeightFrac: 0.85,
+    crabClawFrac: 0.62,
+    crabClawOutFrac: 1.55,
+    crabClawUpFrac: 0.7,
+    crabEyeOutFrac: 0.52,
+    crabEyeUpFrac: 1.15,
+    crabEyeFrac: 0.5,
+    crabPupilFrac: 0.26,
     // Enemy count pill badge above each clump.
     pillPadXPx: 8,
     pillHeightPx: 24,
     pillRadiusPx: 12,
 
-    // Boss number badge and the slow inward swirl inside the drain.
+    // Boss number badge.
     badgePadXPx: 18,
     badgeHeightPx: 64,
     badgeRadiusPx: 16,
     badgeRimPx: 3,
-    swirlTurns: 2.2,
-    swirlArms: 2,
-    swirlRadPerSec: 1.1,
-    swirlAlpha: 0.35,
-    swirlStrokePx: 2.5,
 
     // HUD: rounded tag behind the chunky-outlined count label.
     hudTagAlpha: 0.28,
@@ -481,64 +518,63 @@ export const CONFIG = {
   },
 
   colors: {
-    // Duckling park theme: light sky over a warm horizon, grass sides with a
-    // pond strip, warm sand path, yellow flock. All game colours live here.
+    // Duckling park theme, loud saturated cartoon: punchy sky over a warm
+    // horizon, vivid grass, rich sand path, hot yellow flock, everything
+    // ringed by a thick dark brown outline. All game colours live here.
     // bg is the menu/overlay backdrop; the in-game backdrop is the sky.
     bg: '#0B3B45',
-    skyTop: '#8ECDEB',
-    skyHorizon: '#FBE3B6',
+    skyTop: '#38B6F5',
+    skyHorizon: '#FFE182',
     cloud: '#FFFFFF',
-    grass: '#7CBF5E',
-    flowerPink: '#F9A8D4',
-    flowerWhite: '#FDFDFB',
-    flowerCenter: '#FACC15',
-    pebble: '#A8A29E',
-    pond: '#4C9FD8',
-    lilypad: '#4C9E45',
-    lane: '#EDD5A3',
-    laneEdge: '#CBAA70',
-    laneHighlight: '#FFF6DE',
-    laneSpeckle: '#B99A62',
-    stripe: '#F5EFDC',
-    dust: '#F7E8C3',
-    shadow: '#20303C',
-    crowd: '#FDE047',
-    crowdHead: '#FEF08A',
-    beak: '#F97316',
+    grass: '#4FC42D',
+    flowerPink: '#FF7BCE',
+    flowerWhite: '#FFFFFF',
+    flowerCenter: '#FFC400',
+    pebble: '#BAB1A5',
+    pond: '#1FA0F2',
+    lilypad: '#2E9E1F',
+    lane: '#F4C862',
+    laneEdge: '#C8862E',
+    laneHighlight: '#FFE9AC',
+    laneSpeckle: '#D8A245',
+    stripe: '#FFEFC2',
+    dust: '#FFE9B8',
+    shadow: '#2E2013',
+    // The thick cartoon outline around every entity (dark warm brown).
+    outline: '#4A2F1A',
+    crowd: '#FFD500',
+    crowdHead: '#FFE24A',
+    beak: '#FF8A00',
     mama: '#FFFFFF',
-    mamaHead: '#F8FAFC',
-    goodGate: '#14B8A6',
-    badGate: '#EF4444',
-    gambleGate: '#A855F7',
+    mamaHead: '#FFFDF4',
+    goodGate: '#00C9A3',
+    badGate: '#FF3B30',
+    gambleGate: '#B32EF5',
     gateText: '#FFFFFF',
     // Chunky operator text: deep per-kind fill under a thick white outline.
-    goodGateText: '#0F766E',
-    badGateText: '#B91C1C',
-    gambleGateText: '#86198F',
+    goodGateText: '#00786A',
+    badGateText: '#C4160C',
+    gambleGateText: '#7A0FB8',
     gateOutline: '#FFFFFF',
-    gateFrame: '#F1F5F9',
-    gateFrameShade: '#94A3B8',
-    warnStripe: '#450A0A',
+    gateFrame: '#FFF6E3',
+    gateFrameShade: '#B99C6C',
+    warnStripe: '#5B0A05',
     sparkle: '#FDF4FF',
-    enemy: '#EF4444',
-    enemyHead: '#FCA5A5',
-    crabClaw: '#DC2626',
+    enemy: '#F53D2A',
+    crabClaw: '#D92B14',
     crabEye: '#FFFFFF',
-    crabPupil: '#292524',
-    pill: '#DC2626',
-    // Storm drain greys: grate body, dark slots, rim, swirl and the win cap.
-    drain: '#26262B',
-    drainSlot: '#0B0B0E',
-    drainRim: '#55555E',
-    drainSwirl: '#8A8A93',
-    drainCap: '#A1A1AA',
-    bossBadge: '#B91C1C',
-    bossBadgeRim: '#FECACA',
+    crabPupil: '#1D130A',
+    pill: '#E02414',
+    // Boss crab: bigger, meaner, slightly deeper red than the clump crabs.
+    bossBody: '#EF4B1F',
+    bossClaw: '#D63310',
+    bossBadge: '#C4160C',
+    bossBadgeRim: '#FFD9D4',
     hudTag: '#0F172A',
-    coin: '#FBBF24',
+    coin: '#FFC400',
     // UI accent for buttons (the yellow flock colour reads poorly there).
-    button: '#0D9488',
+    button: '#00A88C',
     label: '#FFFFFF',
-    labelShadow: '#1C1917',
+    labelShadow: '#33200E',
   },
 } as const;

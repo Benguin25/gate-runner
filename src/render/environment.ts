@@ -23,18 +23,20 @@ export function drawSky(
   const horizonY = h * CONFIG.lane.horizonYFrac;
   canvas.drawRect(Skia.XYWHRect(0, 0, w, horizonY), cache.skyPaint(w, h));
 
-  // Soft clouds: three overlapping puffs each, drifting and wrapping.
+  // Clouds: simple wide lozenges drifting and wrapping across the band.
   const cloud = cache.paint('cloud');
   cloud.setAlphaf(V.cloudAlpha);
   for (let i = 0; i < V.cloudCount; i++) {
-    const r = lerp(V.cloudMinRadiusPx, V.cloudMaxRadiusPx, hash01(i * 7 + 1));
+    const cw = lerp(V.cloudMinWidthPx, V.cloudMaxWidthPx, hash01(i * 7 + 1));
+    const ch = cw * V.cloudHeightFrac;
     const speed = lerp(V.cloudSpeedMinPx, V.cloudSpeedMaxPx, hash01(i * 7 + 2));
-    const span = w + r * 4;
-    const x = ((hash01(i * 7 + 3) * span + time * speed) % span) - r * 2;
+    const span = w + cw * 2;
+    const x = ((hash01(i * 7 + 3) * span + time * speed) % span) - cw;
     const y = h * lerp(V.cloudBandTopFrac, V.cloudBandBottomFrac, hash01(i * 7 + 4));
-    canvas.drawCircle(x, y, r * 0.8, cloud);
-    canvas.drawCircle(x - r * 0.75, y + r * 0.25, r * 0.6, cloud);
-    canvas.drawCircle(x + r * 0.7, y + r * 0.22, r * 0.62, cloud);
+    canvas.drawRRect(
+      Skia.RRectXY(Skia.XYWHRect(x - cw / 2, y - ch / 2, cw, ch), ch / 2, ch / 2),
+      cloud
+    );
   }
   cloud.setAlphaf(1);
 }

@@ -128,7 +128,7 @@ export function updateSim(s: SimState, dt: number): SimPhase {
 
   if (s.phase === 'boss') {
     if (s.count * s.unitStrength > s.boss.count) {
-      // Big enough: mama caps the drain, then the level clears.
+      // Big enough: the boss crab tips over and slides off, then the level clears.
       if (s.boss.knockT === 0) {
         emit(s, 'bossHit');
       }
@@ -139,7 +139,7 @@ export function updateSim(s: SimState, dt: number): SimPhase {
         emit(s, 'won');
       }
     } else {
-      // Too small: the ducklings get pulled into the drain one by one.
+      // Too small: the crab snatches ducklings one by one.
       s.drainAcc += CONFIG.boss.drainPerSec * dt;
       const whole = Math.floor(s.drainAcc);
       if (whole > 0) {

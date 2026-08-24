@@ -90,9 +90,16 @@ Visual reference: Count Masters / Top War ads. Blue crowd, teal good gates, red 
 
 ## Theme
 Ducklings following mama duck. The crowd is yellow ducklings; the count label sits
-over the flock. Lane is a park path with a pond feel. Boss at the end is a storm
-drain with a number on it — beat it and mama caps the drain, ducklings celebrate;
-lose and they get pulled in one by one (keep it cartoony, they pop back out on retry).
+over the flock. Lane is a park path with a pond feel. Boss at the end is a single
+giant grumpy crab (3-4x duckling scale) with a number over its head — beat it and
+it tips over backwards and slides off, ducklings celebrate; lose and it snaps its
+pincers and snatches them one by one (keep it cartoony, they pop back out on retry).
 Good gates teal, bad gates red, unchanged. Ducklings: yellow circle body, smaller
-head circle, orange triangle beak, 2-frame waddle bob. Mama duck leads the flock,
-slightly bigger, white.
+head circle, orange triangle beak, two black eyes, 2-frame waddle bob, slight
+random lean. Mama duck leads the flock, 1.6x, white, with a visible stern brow.
+
+Art direction: loud saturated cartoon (Count Masters energy). Every entity —
+ducklings, mama, crabs, boss, gate frames — carries a thick dark brown outline
+(~2.5px, scaled with perspective). Vivid grass, rich sand, punchy sky; clouds
+are 2-3 simple wide lozenges. Rendered flock capped at 80 big, loosely spaced
+ducklings so individuals read; the count label carries the number beyond that.
