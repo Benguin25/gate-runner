@@ -1,20 +1,22 @@
 import type { SkCanvas, SkFont, SkPaint, SkPath } from '@shopify/react-native-skia';
-import { Skia } from '@shopify/react-native-skia';
+import { ClipOp, Skia } from '@shopify/react-native-skia';
 import { CONFIG } from '../game/config';
 import { isGoodOp, opLabel } from '../game/ops';
 import type { SimState } from '../game/types';
 import { blobRadiusPx, blobScale, slotX, slotY } from '../engine/formation';
 import { projectDepth, isCulled } from '../engine/projection';
-import { clamp, lerp } from '../engine/utils';
+import { clamp, hash01, lerp } from '../engine/utils';
 import type { GameFonts } from './fonts';
-import type { RenderCache } from './cache';
+import type { ColorName, RenderCache } from './cache';
+import { drawGround, drawSky } from './environment';
 import { ParticleKind, shakeOffset, type FxState } from './fx';
 
 // Everything is drawn procedurally with Skia — no image assets. Called once
 // per frame from GameCanvas's picture recording on the JS thread. Paints,
 // colours and static lane geometry come from the RenderCache: at the 300-unit
 // render cap this loop is the hot path, so it makes no per-frame Skia
-// allocations and no setColor calls with string colours.
+// allocations beyond rects and no setColor calls with string colours. Drop
+// shadows batch into one shared path per group for the same reason.
 
 export function drawGame(
   canvas: SkCanvas,
@@ -31,10 +33,8 @@ export function drawGame(
   const dist = lerp(s.prevDistance, s.distance, alpha);
   const crowdX = lerp(s.prevCrowdX, s.crowdX, alpha);
 
-  canvas.drawRect(Skia.XYWHRect(0, 0, w, h), cache.paint('bg'));
-
-  // Boss-hit screen shake displaces the whole world; the flash overlay below
-  // stays put.
+  // The sky stays put; the boss-hit screen shake displaces the ground world.
+  drawSky(canvas, w, h, s.time, cache);
   const shake = shakeOffset(fx);
   const shaken = shake.x !== 0 || shake.y !== 0;
   if (shaken) {
@@ -42,7 +42,7 @@ export function drawGame(
     canvas.translate(shake.x, shake.y);
   }
 
-  drawLane(canvas, w, h, dist, cache);
+  drawGround(canvas, w, h, dist, s.time, cache);
   drawGates(canvas, s, w, h, cx, dist, cache, fonts.gate, fonts.small);
   drawEnemies(canvas, s, w, h, cx, dist, cache, fonts.small);
   drawBoss(canvas, s, w, h, cx, dist, cache, fonts.boss);
@@ -72,37 +72,6 @@ export function drawGame(
   }
 }
 
-function drawLane(
-  canvas: SkCanvas,
-  w: number,
-  h: number,
-  dist: number,
-  cache: RenderCache
-): void {
-  const L = CONFIG.lane;
-  const lane = cache.laneGeometry(w, h);
-  canvas.drawPath(lane.surface, cache.paint('lane'));
-  canvas.drawPath(lane.leftEdge, cache.edgePaint);
-  canvas.drawPath(lane.rightEdge, cache.edgePaint);
-
-  // Cross-lane stripes scrolling toward the camera for a sense of speed.
-  const stripe = cache.paint('stripe');
-  const firstStripeZ = Math.floor(dist / L.stripeSpacing) * L.stripeSpacing;
-  for (let k = 0; k < 16; k++) {
-    const dz = firstStripeZ + k * L.stripeSpacing - dist;
-    if (isCulled(dz)) {
-      continue;
-    }
-    const proj = projectDepth(dz, w, h);
-    stripe.setAlphaf(L.stripeAlpha * (1 - Math.max(0, proj.p)));
-    canvas.drawRect(
-      Skia.XYWHRect(w / 2 - proj.halfW, proj.y - 1, proj.halfW * 2, 2),
-      stripe
-    );
-  }
-  stripe.setAlphaf(1);
-}
-
 function drawGates(
   canvas: SkCanvas,
   s: SimState,
@@ -115,7 +84,7 @@ function drawGates(
   smallFont: SkFont
 ): void {
   const G = CONFIG.gates;
-  const text = cache.paint('gateText');
+  const V = CONFIG.visual;
   // Lookahead: the current row draws normally, the row after it draws dimmed
   // (smaller with a readable text floor), and rows beyond that stay hidden —
   // the read is always exactly two rows deep.
@@ -142,47 +111,236 @@ function drawGates(
     const textScale = lookahead
       ? Math.max(proj.scale, G.lookaheadTextMinScale)
       : proj.scale;
-    const wallH = G.heightPx * proj.scale;
     const r = G.cornerRadiusPx * proj.scale;
     // A row with a middle gamble gate is a trio of thirds, otherwise halves.
     const cols = gate.middle ? 3 : 2;
     const colW = (proj.halfW * 2) / cols;
 
+    // Faint shadow band the whole row casts on the path.
+    const band = cache.paint('shadow');
+    band.setAlphaf(V.gateShadowAlpha * dim * (gate.used ? 0.4 : 1));
+    canvas.drawRect(
+      Skia.XYWHRect(
+        cx - proj.halfW,
+        proj.y + proj.scale,
+        proj.halfW * 2,
+        V.gateShadowHeightPx * proj.scale
+      ),
+      band
+    );
+    band.setAlphaf(1);
+
     for (let c = 0; c < cols; c++) {
       const side = cols === 3 ? c - 1 : c === 0 ? -1 : 1;
       const gamble = cols === 3 && side === 0 ? gate.middle : undefined;
       const op = side < 0 ? gate.left : gate.right;
+      const good = !gamble && isGoodOp(op);
       const x0 = cx - proj.halfW + c * colW;
+      // Good gates pulse gently: the wall grows a touch and the glow swells.
+      let pulse = 0;
+      let wallH = G.heightPx * proj.scale;
+      if (good && !gate.used) {
+        pulse = 0.5 + 0.5 * Math.sin(s.time * Math.PI * 2 * V.goodPulseHz + gate.z);
+        wallH += V.goodPulseGrowPx * proj.scale * pulse;
+      }
       let a: number = (gate.used ? G.passedOpacity : G.opacity) * dim;
       if (gate.used && gate.hitSide === side && gate.flash > 0) {
         // The chosen gate flashes bright as the number pops.
         a = lerp(G.passedOpacity, 1, gate.flash / G.hitFlashSec);
       }
-      const wall = cache.paint(
-        gamble ? 'gambleGate' : isGoodOp(op) ? 'goodGate' : 'badGate'
-      );
+      // Decoration strength relative to a fresh wall, so stripes, glow and
+      // sparkles dim in step with passed/lookahead walls.
+      const deco = clamp(a / G.opacity, 0, 1);
+      const rrect = Skia.RRectXY(Skia.XYWHRect(x0, proj.y - wallH, colW, wallH), r, r);
+      const wall = cache.paint(gamble ? 'gambleGate' : good ? 'goodGate' : 'badGate');
       wall.setAlphaf(a);
-      canvas.drawRRect(
-        Skia.RRectXY(Skia.XYWHRect(x0, proj.y - wallH, colW, wallH), r, r),
-        wall
-      );
+      canvas.drawRRect(rrect, wall);
       wall.setAlphaf(1);
 
-      text.setAlphaf(clamp(a + 0.25, 0, 1));
+      // Slight 3D face: a darker strip along the bottom of the wall.
+      const bevel = cache.paint('shadow');
+      bevel.setAlphaf(V.bevelAlpha * deco);
+      const bevelH = V.bevelHeightPx * proj.scale;
+      canvas.drawRRect(
+        Skia.RRectXY(Skia.XYWHRect(x0, proj.y - bevelH, colW, bevelH), r * 0.6, r * 0.6),
+        bevel
+      );
+      bevel.setAlphaf(1);
+
+      // Inner glow: a light stroke inset inside the face.
+      const gi = V.glowInsetPx * proj.scale;
+      if (wallH > gi * 3) {
+        const glow = cache.strokePaint('gateOutline');
+        glow.setStrokeWidth(V.glowWidthPx * proj.scale);
+        glow.setAlphaf(
+          V.glowAlpha * deco * (good && !gate.used ? 1 - V.goodPulseAmp * (1 - pulse) : 0.7)
+        );
+        canvas.drawRRect(
+          Skia.RRectXY(
+            Skia.XYWHRect(x0 + gi, proj.y - wallH + gi, colW - gi * 2, wallH - gi * 2),
+            r * 0.7,
+            r * 0.7
+          ),
+          glow
+        );
+        glow.setAlphaf(1);
+      }
+
+      if (!gamble && !good) {
+        drawWarnStripes(canvas, cache, rrect, x0, colW, wallH, proj.y, proj.scale, deco);
+      }
+      if (gamble) {
+        drawSparkles(canvas, cache, s.time, i, x0, colW, wallH, proj.y, proj.scale, deco);
+      }
+
+      drawGateFrame(canvas, cache, x0, colW, wallH, proj.y, proj.scale, a, c === 0);
+
+      const fill: ColorName = gamble
+        ? 'gambleGateText'
+        : good
+          ? 'goodGateText'
+          : 'badGateText';
+      const textA = clamp(a + 0.3, 0, 1);
       canvas.save();
       canvas.translate(x0 + colW / 2, proj.y - wallH / 2);
       canvas.scale(textScale, textScale);
       if (gamble) {
         // Both possible outcomes stacked: the gamble shows what it offers.
-        drawCenteredText(canvas, `x${gamble.value}`, 0, -G.textFontSize * 0.1, smallFont, text, cache);
-        drawCenteredText(canvas, `÷${gamble.value}`, 0, G.textFontSize * 0.57, smallFont, text, cache);
+        const ow = V.gateOutlinePx * 0.7;
+        drawChunkyText(canvas, `x${gamble.value}`, 0, -G.textFontSize * 0.1, smallFont, cache, fill, 'gateOutline', ow, textA);
+        drawChunkyText(canvas, `÷${gamble.value}`, 0, G.textFontSize * 0.57, smallFont, cache, fill, 'gateOutline', ow, textA);
       } else {
-        drawCenteredText(canvas, opLabel(op), 0, G.textFontSize * 0.36, font, text, cache);
+        drawChunkyText(canvas, opLabel(op), 0, G.textFontSize * 0.36, font, cache, fill, 'gateOutline', V.gateOutlinePx, textA);
       }
       canvas.restore();
     }
   }
-  text.setAlphaf(1);
+}
+
+/** Low-opacity diagonal hazard stripes clipped inside a bad gate's wall. */
+function drawWarnStripes(
+  canvas: SkCanvas,
+  cache: RenderCache,
+  rrect: ReturnType<typeof Skia.RRectXY>,
+  x0: number,
+  colW: number,
+  wallH: number,
+  baseY: number,
+  scale: number,
+  deco: number
+): void {
+  const V = CONFIG.visual;
+  canvas.save();
+  canvas.clipRRect(rrect, ClipOp.Intersect, true);
+  const stripes = cache.scratchPath();
+  const period = (V.warnStripeWidthPx + V.warnStripeGapPx) * scale;
+  const sw = V.warnStripeWidthPx * scale;
+  const yT = baseY - wallH;
+  for (let sx = x0 - wallH; sx < x0 + colW; sx += period) {
+    stripes.moveTo(sx, baseY);
+    stripes.lineTo(sx + sw, baseY);
+    stripes.lineTo(sx + sw + wallH, yT);
+    stripes.lineTo(sx + wallH, yT);
+    stripes.close();
+  }
+  const warn = cache.paint('warnStripe');
+  warn.setAlphaf(V.warnStripeAlpha * deco);
+  canvas.drawPath(stripes, warn);
+  warn.setAlphaf(1);
+  canvas.restore();
+}
+
+/** Twinkling sparkle diamonds over the purple gamble wall. */
+function drawSparkles(
+  canvas: SkCanvas,
+  cache: RenderCache,
+  time: number,
+  gateIdx: number,
+  x0: number,
+  colW: number,
+  wallH: number,
+  baseY: number,
+  scale: number,
+  deco: number
+): void {
+  const V = CONFIG.visual;
+  const sp = cache.paint('sparkle');
+  for (let j = 0; j < V.sparkleCount; j++) {
+    const h1 = hash01(gateIdx * 97 + j * 31);
+    const h2 = hash01(gateIdx * 97 + j * 31 + 1);
+    const h3 = hash01(gateIdx * 97 + j * 31 + 2);
+    const px = x0 + (0.12 + 0.76 * h1) * colW;
+    const py = baseY - wallH * (0.12 + 0.76 * h2);
+    const tw = 0.3 + 0.7 * Math.abs(Math.sin(time * Math.PI * 2 * V.sparkleHz + j * 2.1 + gateIdx));
+    const size = lerp(V.sparkleMinPx, V.sparkleMaxPx, h3) * scale * (0.6 + 0.4 * tw);
+    sp.setAlphaf(deco * tw);
+    const d = cache.scratchPath();
+    d.moveTo(px, py - size);
+    d.lineTo(px + size * 0.38, py);
+    d.lineTo(px, py + size);
+    d.lineTo(px - size * 0.38, py);
+    d.close();
+    canvas.drawPath(d, sp);
+  }
+  sp.setAlphaf(1);
+}
+
+/** Gate frame: two posts and a crossbar over the wall. */
+function drawGateFrame(
+  canvas: SkCanvas,
+  cache: RenderCache,
+  x0: number,
+  colW: number,
+  wallH: number,
+  baseY: number,
+  scale: number,
+  wallAlpha: number,
+  leftmost: boolean
+): void {
+  const V = CONFIG.visual;
+  const postW = V.postWidthPx * scale;
+  const rise = V.postRisePx * scale;
+  const barH = V.crossbarHeightPx * scale;
+  const topY = baseY - wallH - rise;
+  const frame = cache.paint('gateFrame');
+  frame.setAlphaf(clamp(wallAlpha + 0.15, 0, 1));
+  // Adjacent walls share their boundary post; only draw the left post for
+  // the leftmost wall so shared posts aren't double-painted.
+  if (leftmost) {
+    canvas.drawRRect(
+      Skia.RRectXY(
+        Skia.XYWHRect(x0 - postW / 2, topY, postW, wallH + rise),
+        postW / 2,
+        postW / 2
+      ),
+      frame
+    );
+  }
+  canvas.drawRRect(
+    Skia.RRectXY(
+      Skia.XYWHRect(x0 + colW - postW / 2, topY, postW, wallH + rise),
+      postW / 2,
+      postW / 2
+    ),
+    frame
+  );
+  canvas.drawRRect(
+    Skia.RRectXY(
+      Skia.XYWHRect(x0 - postW / 2, topY - barH, colW + postW, barH),
+      barH / 2,
+      barH / 2
+    ),
+    frame
+  );
+  frame.setAlphaf(1);
+  // A thin shade line under the crossbar sells the slight 3D.
+  const shade = cache.paint('gateFrameShade');
+  shade.setAlphaf(0.5 * wallAlpha);
+  canvas.drawRect(
+    Skia.XYWHRect(x0 - postW / 2, topY, colW + postW, 1.5 * scale),
+    shade
+  );
+  shade.setAlphaf(1);
 }
 
 function drawEnemies(
@@ -196,8 +354,11 @@ function drawEnemies(
   font: SkFont
 ): void {
   const E = CONFIG.enemies;
+  const V = CONFIG.visual;
   const body = cache.paint('enemy');
-  const head = cache.paint('enemyHead');
+  const claw = cache.paint('crabClaw');
+  const eye = cache.paint('crabEye');
+  const pupil = cache.paint('crabPupil');
   for (let i = s.enemies.length - 1; i >= 0; i--) {
     const e = s.enemies[i];
     const dz = e.z - dist;
@@ -208,17 +369,63 @@ function drawEnemies(
     const ex = cx + e.x * proj.halfW;
     const n = Math.min(e.count, E.renderCap);
     const r = E.unitRadiusPx * proj.scale;
+
+    // Soft drop shadows first, batched into one flattened-circle path.
+    drawShadowBatch(canvas, cache, (path, k) => {
+      for (let j = 0; j < n; j++) {
+        const px = ex + slotX(j, E.slotSpacingPx) * proj.scale;
+        const py = proj.y + slotY(j, E.slotSpacingPx) * proj.scale;
+        path.addCircle(px, (py + r * V.shadowDropFrac) / k, r * V.shadowWidthFrac);
+      }
+    });
+
+    // Grumpy crabs: flat red body, raised pincers, glaring eye stalks.
     for (let j = 0; j < n; j++) {
       const px = ex + slotX(j, E.slotSpacingPx) * proj.scale;
       const py = proj.y + slotY(j, E.slotSpacingPx) * proj.scale;
-      canvas.drawCircle(px, py, r, body);
-      canvas.drawCircle(px, py - r * 0.9, r * CONFIG.crowd.headRadiusFrac, head);
+      const clawR = r * V.crabClawFrac;
+      canvas.drawCircle(px - r * V.crabClawOutFrac, py - r * V.crabClawUpFrac, clawR, claw);
+      canvas.drawCircle(px + r * V.crabClawOutFrac, py - r * V.crabClawUpFrac, clawR, claw);
+      const rw = r * V.crabBodyWidthFrac;
+      const rh = r * V.crabBodyHeightFrac;
+      canvas.drawOval(Skia.XYWHRect(px - rw, py - rh, rw * 2, rh * 2), body);
+      const eyeR = r * V.crabEyeFrac;
+      const eyeY = py - r * V.crabEyeUpFrac;
+      canvas.drawCircle(px - r * V.crabEyeOutFrac, eyeY, eyeR, eye);
+      canvas.drawCircle(px + r * V.crabEyeOutFrac, eyeY, eyeR, eye);
+      // Pupils sit low and inward for the hostile glare.
+      const pupilR = r * V.crabPupilFrac;
+      canvas.drawCircle(px - r * V.crabEyeOutFrac * 0.8, eyeY + eyeR * 0.25, pupilR, pupil);
+      canvas.drawCircle(px + r * V.crabEyeOutFrac * 0.8, eyeY + eyeR * 0.25, pupilR, pupil);
     }
+
+    // Count in a small red pill badge above the clump.
     const clumpR = blobRadiusPx(n, E.slotSpacingPx) * proj.scale;
     canvas.save();
-    canvas.translate(ex, proj.y - clumpR - 6 * proj.scale);
+    canvas.translate(ex, proj.y - clumpR - (V.pillHeightPx * 0.5 + 8) * proj.scale);
     canvas.scale(proj.scale, proj.scale);
-    drawCenteredText(canvas, `${e.count}`, 0, 0, font, cache.paint('label'), cache);
+    const text = `${e.count}`;
+    const halfW = cache.textWidth(font, text) / 2 + V.pillPadXPx;
+    const shadow = cache.paint('shadow');
+    shadow.setAlphaf(0.3);
+    canvas.drawRRect(
+      Skia.RRectXY(
+        Skia.XYWHRect(-halfW, -V.pillHeightPx / 2 + 2, halfW * 2, V.pillHeightPx),
+        V.pillRadiusPx,
+        V.pillRadiusPx
+      ),
+      shadow
+    );
+    shadow.setAlphaf(1);
+    canvas.drawRRect(
+      Skia.RRectXY(
+        Skia.XYWHRect(-halfW, -V.pillHeightPx / 2, halfW * 2, V.pillHeightPx),
+        V.pillRadiusPx,
+        V.pillRadiusPx
+      ),
+      cache.paint('pill')
+    );
+    drawCenteredText(canvas, text, 0, E.labelFontSize * 0.36, font, cache.paint('label'), cache);
     canvas.restore();
   }
 }
@@ -234,6 +441,7 @@ function drawBoss(
   font: SkFont
 ): void {
   const B = CONFIG.boss;
+  const V = CONFIG.visual;
   const dz = s.boss.z - dist;
   if (isCulled(dz)) {
     return;
@@ -252,9 +460,23 @@ function drawBoss(
   canvas.translate(cx, proj.y);
   // The grate lies on the path: flattened by the fake perspective.
   canvas.scale(proj.scale * pulse, proj.scale * B.drainFlatten * pulse);
+  // Soft shadow pooling under the grate.
+  const shadow = cache.paint('shadow');
+  shadow.setAlphaf(V.bossShadowAlpha);
+  canvas.drawCircle(0, R * 0.1, R * V.bossShadowScale, shadow);
+  shadow.setAlphaf(1);
   canvas.drawCircle(0, 0, R, cache.paint('drainRim'));
   canvas.drawCircle(0, 0, R * (1 - B.rimFrac), cache.paint('drain'));
   canvas.drawPath(cache.drainSlotsPath(), cache.paint('drainSlot'));
+  // Slow inward swirl: spiral arms rotating over the grate.
+  canvas.save();
+  canvas.rotate((s.time * V.swirlRadPerSec * 180) / Math.PI, 0, 0);
+  const swirl = cache.strokePaint('drainSwirl');
+  swirl.setStrokeWidth(V.swirlStrokePx);
+  swirl.setAlphaf(V.swirlAlpha);
+  canvas.drawPath(cache.swirlPath(), swirl);
+  swirl.setAlphaf(1);
+  canvas.restore();
   if (kt > 0) {
     // Win: the cover slides in from the crowd side and seats with an ease-out.
     const slide = 1 - (1 - kt) * (1 - kt);
@@ -262,12 +484,48 @@ function drawBoss(
   }
   canvas.restore();
 
-  // The number over the drain, until the cap covers it.
+  // The number over the drain — the biggest text on screen, in a big badge —
+  // until the cap covers it.
   if (kt < 0.2) {
     canvas.save();
     canvas.translate(cx, proj.y - (R * B.drainFlatten + B.numberGapPx) * proj.scale);
     canvas.scale(proj.scale, proj.scale);
-    drawShadowedText(canvas, `${s.boss.count}`, 0, 0, font, cache);
+    const text = `${s.boss.count}`;
+    const halfW = cache.textWidth(font, text) / 2 + V.badgePadXPx;
+    const bh = V.badgeHeightPx;
+    const badgeShadow = cache.paint('shadow');
+    badgeShadow.setAlphaf(0.3);
+    canvas.drawRRect(
+      Skia.RRectXY(
+        Skia.XYWHRect(-halfW, -bh / 2 + 3, halfW * 2, bh),
+        V.badgeRadiusPx,
+        V.badgeRadiusPx
+      ),
+      badgeShadow
+    );
+    badgeShadow.setAlphaf(1);
+    canvas.drawRRect(
+      Skia.RRectXY(
+        Skia.XYWHRect(
+          -halfW - V.badgeRimPx,
+          -bh / 2 - V.badgeRimPx,
+          (halfW + V.badgeRimPx) * 2,
+          bh + V.badgeRimPx * 2
+        ),
+        V.badgeRadiusPx + V.badgeRimPx,
+        V.badgeRadiusPx + V.badgeRimPx
+      ),
+      cache.paint('bossBadgeRim')
+    );
+    canvas.drawRRect(
+      Skia.RRectXY(
+        Skia.XYWHRect(-halfW, -bh / 2, halfW * 2, bh),
+        V.badgeRadiusPx,
+        V.badgeRadiusPx
+      ),
+      cache.paint('bossBadge')
+    );
+    drawShadowedText(canvas, text, 0, B.numberFontSize * 0.36, font, cache);
     canvas.restore();
   }
 }
@@ -285,8 +543,11 @@ function drawCrowd(
 ): void {
   const K = CONFIG.crowd;
   const J = CONFIG.juice;
+  const V = CONFIG.visual;
   const proj = projectDepth(0, w, h);
-  const bs = blobScale(s.count);
+  // The blob breathes subtly at idle on top of the steering squish.
+  const breathe = 1 + Math.sin(s.time * Math.PI * 2 * V.breatheHz) * V.breatheAmp;
+  const bs = blobScale(s.count) * breathe;
   const sx = cx + crowdX * proj.halfW;
   const sy = proj.y;
   // Fast steering squishes the blob narrower (and slightly taller).
@@ -297,8 +558,34 @@ function drawCrowd(
   const lost = s.phase === 'lost';
   const body = cache.paint('crowd');
   const head = cache.paint('crowdHead');
-  const headDist = K.unitRadiusPx * bs * 0.9;
-  const headR = K.unitRadiusPx * bs * K.headRadiusFrac;
+  const unitR = K.unitRadiusPx * bs;
+  const headDist = unitR * 0.9;
+  const headR = unitR * K.headRadiusFrac;
+
+  // Mama's resting spot, needed up front so her shadow batches with the flock.
+  const blobR = blobRadiusPx(s.unitsActive, K.slotSpacingPx) * bs;
+  const frontR = blobR * K.ellipseFlatten * (1 + fx.squish * 0.4);
+  const mamaR = K.unitRadiusPx * K.mamaScale * bs;
+  const mamaHeadR = mamaR * K.headRadiusFrac;
+  const mamaBaseY = sy - frontR - K.mamaGapPx - mamaR;
+
+  // Soft drop shadows under every duckling and mama, one batched path.
+  drawShadowBatch(canvas, cache, (path, k) => {
+    for (let i = 0; i < s.unitsActive; i++) {
+      const u = s.units[i];
+      path.addCircle(
+        sx + u.x * scaleX,
+        (sy + u.y * scaleY + unitR * V.shadowDropFrac) / k,
+        unitR * V.shadowWidthFrac
+      );
+    }
+    path.addCircle(
+      sx,
+      (mamaBaseY + mamaR * V.shadowDropFrac) / k,
+      mamaR * V.shadowWidthFrac
+    );
+  });
+
   // All beaks batch into one shared path — one draw call, no allocations.
   const beaks = cache.scratchPath();
   // 2-frame waddle clock, shared by the flock; each duckling alternates phase.
@@ -332,25 +619,21 @@ function drawCrowd(
         const dir = u.x >= 0 ? 1 : -1;
         hx = Math.sin(angle) * dir * headDist;
         hy = -Math.cos(angle) * headDist;
-        py += t * K.unitRadiusPx * bs * 0.5;
+        py += t * unitR * 0.5;
       }
     }
 
     py += bob;
-    canvas.drawCircle(px, py, K.unitRadiusPx * bs, body);
+    canvas.drawCircle(px, py, unitR, body);
     canvas.drawCircle(px + hx, py + hy, headR, head);
     addBeak(beaks, px + hx, py + hy, headR);
   }
 
   // Mama duck leads the flock: bigger, white, just ahead of the blob's front
   // edge, waddling on the same 2-frame clock.
-  const blobR = blobRadiusPx(s.unitsActive, K.slotSpacingPx) * bs;
-  const frontR = blobR * K.ellipseFlatten * (1 + fx.squish * 0.4);
-  const mamaR = K.unitRadiusPx * K.mamaScale * bs;
-  const mamaHeadR = mamaR * K.headRadiusFrac;
   {
     const frame = waddleFrame & 1;
-    let my = sy - frontR - K.mamaGapPx - mamaR;
+    let my = mamaBaseY;
     let bob = frame ? -K.bobAmplitudePx : 0;
     const mx = sx + (frame ? 1 : -1) * K.waddleRockPx;
     let hx = 0;
@@ -392,15 +675,27 @@ function drawCrowd(
     }
     // Count label pops bigger for a beat whenever a gate or enemy changes it.
     const pop = 1 + (fx.labelPopAmp - 1) * (fx.labelPopT / J.labelPopSec);
+    canvas.save();
+    canvas.translate(sx, labelY);
     if (pop > 1.001) {
-      canvas.save();
-      canvas.translate(sx, labelY);
       canvas.scale(pop, pop);
-      drawShadowedText(canvas, labelText, 0, 0, font, cache);
-      canvas.restore();
-    } else {
-      drawShadowedText(canvas, labelText, sx, labelY, font, cache);
     }
+    // Subtle rounded tag behind the chunky-outlined count.
+    const tagHalfW = cache.textWidth(font, labelText) / 2 + V.hudTagPadXPx;
+    const tagH = K.labelFontSize + V.hudTagPadYPx * 2;
+    const tag = cache.paint('hudTag');
+    tag.setAlphaf(V.hudTagAlpha);
+    canvas.drawRRect(
+      Skia.RRectXY(
+        Skia.XYWHRect(-tagHalfW, -K.labelFontSize * 0.36 - tagH / 2, tagHalfW * 2, tagH),
+        V.hudTagRadiusPx,
+        V.hudTagRadiusPx
+      ),
+      tag
+    );
+    tag.setAlphaf(1);
+    drawChunkyText(canvas, labelText, 0, 0, font, cache, 'label', 'labelShadow', V.countOutlinePx, 1);
+    canvas.restore();
   }
 }
 
@@ -414,6 +709,30 @@ function addBeak(path: SkPath, hx: number, hy: number, headR: number): void {
   path.lineTo(hx + halfW, baseY);
   path.lineTo(hx, baseY - len);
   path.close();
+}
+
+/**
+ * Batch soft ellipse drop shadows into a single path drawn under a group of
+ * sprites. The canvas is squashed vertically so plain circles come out as
+ * ground ellipses; the fill callback adds circles in that squashed space
+ * (divide y by `k`), keeping the hot loop free of per-shadow rect allocations.
+ */
+function drawShadowBatch(
+  canvas: SkCanvas,
+  cache: RenderCache,
+  fill: (path: SkPath, k: number) => void
+): void {
+  const V = CONFIG.visual;
+  const k = V.shadowHeightFrac / V.shadowWidthFrac;
+  const shadow = cache.paint('shadow');
+  shadow.setAlphaf(V.shadowAlpha);
+  canvas.save();
+  canvas.scale(1, k);
+  const path = cache.scratchPath();
+  fill(path, k);
+  canvas.drawPath(path, shadow);
+  canvas.restore();
+  shadow.setAlphaf(1);
 }
 
 function drawParticles(canvas: SkCanvas, fx: FxState, cache: RenderCache): void {
@@ -465,6 +784,42 @@ function drawCenteredText(
 ): void {
   const width = cache.textWidth(font, text);
   canvas.drawText(text, cx - width / 2, baselineY, paint, font);
+}
+
+/**
+ * Chunky game text: drop shadow, thick rounded outline, then the fill. The
+ * outline colour is white for gate operators and dark for the count label.
+ */
+function drawChunkyText(
+  canvas: SkCanvas,
+  text: string,
+  cx: number,
+  baselineY: number,
+  font: SkFont,
+  cache: RenderCache,
+  fill: ColorName,
+  outline: ColorName,
+  outlinePx: number,
+  alpha: number
+): void {
+  const V = CONFIG.visual;
+  const width = cache.textWidth(font, text);
+  const x = cx - width / 2;
+  // Shadow of the whole outlined glyph: an offset stroke pass in shadow ink.
+  const shadowStroke = cache.strokePaint('labelShadow');
+  shadowStroke.setStrokeWidth(outlinePx);
+  shadowStroke.setAlphaf(V.textShadowAlpha * alpha);
+  canvas.drawText(text, x + 2, baselineY + 3, shadowStroke, font);
+  shadowStroke.setAlphaf(1);
+  const outlinePaint = cache.strokePaint(outline);
+  outlinePaint.setStrokeWidth(outlinePx);
+  outlinePaint.setAlphaf(alpha);
+  canvas.drawText(text, x, baselineY, outlinePaint, font);
+  outlinePaint.setAlphaf(1);
+  const fillPaint = cache.paint(fill);
+  fillPaint.setAlphaf(alpha);
+  canvas.drawText(text, x, baselineY, fillPaint, font);
+  fillPaint.setAlphaf(1);
 }
 
 function drawShadowedText(

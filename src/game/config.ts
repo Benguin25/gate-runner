@@ -94,7 +94,9 @@ export const CONFIG = {
   enemies: {
     unitRadiusPx: 6,
     slotSpacingPx: 9,
-    renderCap: 40,
+    // Render-only cap per clump; the pill badge carries the real count.
+    // Crabs cost several draws each, so this stays modest for 60fps.
+    renderCap: 28,
     // Crowd centre must be within this normalized-x distance of the clump
     // centre when crossing its row to make contact.
     hitWindowX: 0.38,
@@ -105,19 +107,21 @@ export const CONFIG = {
     // The boss is the storm drain at the end of the path. The fight starts
     // when the crowd gets this close (world units).
     contactDistance: 2.5,
-    bodyRadiusPx: 30,
+    // Purely visual size: the drain spans a good chunk of the lane width.
+    bodyRadiusPx: 46,
     // Grate look: rim thickness and horizontal slot bars as fractions of the
     // body radius, flattened to lie on the path.
-    rimFrac: 0.16,
-    slotCount: 3,
+    rimFrac: 0.14,
+    slotCount: 4,
     slotWidthFrac: 1.3,
-    slotHeightFrac: 0.16,
+    slotHeightFrac: 0.14,
     drainFlatten: 0.62,
     // Suction pulse while a losing crowd is being pulled in.
     pulseScale: 0.05,
     pulseHz: 2.2,
-    numberFontSize: 34,
-    numberGapPx: 18,
+    // Top of the text hierarchy: boss > player count > gates > enemy pills.
+    numberFontSize: 50,
+    numberGapPx: 30,
     // Losing crowds get pulled into the drain at this many ducklings per second.
     drainPerSec: 25,
     // Win: mama caps the drain — the cover slides on over this long.
@@ -341,12 +345,163 @@ export const CONFIG = {
     },
   },
 
+  // Visual-polish tunables. Everything here is render-only: nothing feeds
+  // back into the sim, and every effect can be dialled down independently
+  // if a device drops frames.
+  visual: {
+    // Sky: vertical gradient from skyTop down to a warm skyHorizon band; the
+    // gradient reaches this far past the horizon line so the warmth pools there.
+    skyBandFrac: 1.1,
+    // Soft clouds drifting across the sky band (screen-height fracs).
+    cloudCount: 3,
+    cloudMinRadiusPx: 22,
+    cloudMaxRadiusPx: 38,
+    cloudSpeedMinPx: 5,
+    cloudSpeedMaxPx: 12,
+    cloudAlpha: 0.8,
+    cloudBandTopFrac: 0.02,
+    cloudBandBottomFrac: 0.11,
+
+    // Pond strip hugging the left screen edge (widths as screen fracs at the
+    // bottom / at the horizon). Lilypads scroll with the lane and bob.
+    pondBottomWidthFrac: 0.22,
+    pondTopWidthFrac: 0.055,
+    lilypadCount: 6,
+    lilypadSpacingZ: 4.5,
+    lilypadRadiusPx: 11,
+    lilypadFlatten: 0.6,
+    lilypadBobPx: 2.2,
+    lilypadBobHz: 0.5,
+    // Skip pads where the visible pond sliver is thinner than this.
+    lilypadMinPondPx: 16,
+
+    // Grass-side decorations: one flower or pebble per world slot per side,
+    // anchored to world z so they scroll with the lane.
+    decorCount: 12,
+    decorSpacingZ: 2.4,
+    decorMarginPx: 10,
+    decorBeltPx: 46,
+    flowerChance: 0.6,
+    flowerRadiusPx: 3.2,
+    flowerCenterFrac: 0.45,
+    pebbleRadiusPx: 2.4,
+
+    // Warm sand path: subtle speckle texture rows plus a soft light
+    // highlight just inside each edge.
+    speckleRows: 13,
+    speckleSpacingZ: 1.7,
+    specklePerRow: 3,
+    speckleRadiusPx: 1.4,
+    speckleAlpha: 0.4,
+    edgeHighlightWidthPx: 2.5,
+    edgeHighlightAlpha: 0.5,
+    edgeHighlightInsetPx: 4,
+
+    // Dust motes drifting along the lane edges, scrolling with the lane.
+    moteCount: 8,
+    moteRangeZ: 10,
+    moteRadiusPx: 1.8,
+    moteAlpha: 0.4,
+    moteBobPx: 6,
+    moteBobHz: 0.4,
+    moteEdgeInsetPx: 12,
+
+    // Soft ellipse drop shadows (per-unit ellipse as fracs of body radius).
+    shadowAlpha: 0.15,
+    shadowWidthFrac: 1.25,
+    shadowHeightFrac: 0.42,
+    shadowDropFrac: 0.95,
+    // Faint shadow band gates cast on the path.
+    gateShadowHeightPx: 7,
+    gateShadowAlpha: 0.13,
+    bossShadowAlpha: 0.2,
+    bossShadowScale: 1.12,
+
+    // Gate frame: two posts + crossbar, bevelled face, inner glow.
+    postWidthPx: 7,
+    postRisePx: 10,
+    crossbarHeightPx: 8,
+    bevelHeightPx: 6,
+    bevelAlpha: 0.2,
+    glowInsetPx: 5,
+    glowWidthPx: 3.5,
+    glowAlpha: 0.3,
+    // Good gates pulse gently: glow alpha swings and the wall grows a touch.
+    goodPulseHz: 1.4,
+    goodPulseAmp: 0.4,
+    goodPulseGrowPx: 2,
+    // Bad gates: low-opacity diagonal warning stripes.
+    warnStripeAlpha: 0.14,
+    warnStripeWidthPx: 12,
+    warnStripeGapPx: 15,
+    // Gamble gate: twinkling sparkles over the purple wall.
+    sparkleCount: 5,
+    sparkleHz: 1.8,
+    sparkleMinPx: 2,
+    sparkleMaxPx: 4,
+
+    // Crab enemies (all fracs of the enemy unit radius).
+    crabBodyWidthFrac: 1.25,
+    crabBodyHeightFrac: 0.8,
+    crabClawFrac: 0.5,
+    crabClawOutFrac: 1.35,
+    crabClawUpFrac: 0.55,
+    crabEyeOutFrac: 0.45,
+    crabEyeUpFrac: 0.85,
+    crabEyeFrac: 0.3,
+    crabPupilFrac: 0.16,
+    // Enemy count pill badge above each clump.
+    pillPadXPx: 8,
+    pillHeightPx: 24,
+    pillRadiusPx: 12,
+
+    // Boss number badge and the slow inward swirl inside the drain.
+    badgePadXPx: 18,
+    badgeHeightPx: 64,
+    badgeRadiusPx: 16,
+    badgeRimPx: 3,
+    swirlTurns: 2.2,
+    swirlArms: 2,
+    swirlRadPerSec: 1.1,
+    swirlAlpha: 0.35,
+    swirlStrokePx: 2.5,
+
+    // HUD: rounded tag behind the chunky-outlined count label.
+    hudTagAlpha: 0.28,
+    hudTagPadXPx: 14,
+    hudTagPadYPx: 10,
+    hudTagRadiusPx: 16,
+    countOutlinePx: 6,
+    gateOutlinePx: 6,
+    textShadowAlpha: 0.4,
+
+    // Flock blob breathes subtly at idle.
+    breatheAmp: 0.013,
+    breatheHz: 0.55,
+  },
+
   colors: {
-    // Duckling theme: pond-dark background, sandy park path, yellow flock.
+    // Duckling park theme: light sky over a warm horizon, grass sides with a
+    // pond strip, warm sand path, yellow flock. All game colours live here.
+    // bg is the menu/overlay backdrop; the in-game backdrop is the sky.
     bg: '#0B3B45',
-    lane: '#9C8A66',
-    laneEdge: '#C7B183',
+    skyTop: '#8ECDEB',
+    skyHorizon: '#FBE3B6',
+    cloud: '#FFFFFF',
+    grass: '#7CBF5E',
+    flowerPink: '#F9A8D4',
+    flowerWhite: '#FDFDFB',
+    flowerCenter: '#FACC15',
+    pebble: '#A8A29E',
+    pond: '#4C9FD8',
+    lilypad: '#4C9E45',
+    lane: '#EDD5A3',
+    laneEdge: '#CBAA70',
+    laneHighlight: '#FFF6DE',
+    laneSpeckle: '#B99A62',
     stripe: '#F5EFDC',
+    dust: '#F7E8C3',
+    shadow: '#20303C',
     crowd: '#FDE047',
     crowdHead: '#FEF08A',
     beak: '#F97316',
@@ -356,13 +511,30 @@ export const CONFIG = {
     badGate: '#EF4444',
     gambleGate: '#A855F7',
     gateText: '#FFFFFF',
+    // Chunky operator text: deep per-kind fill under a thick white outline.
+    goodGateText: '#0F766E',
+    badGateText: '#B91C1C',
+    gambleGateText: '#86198F',
+    gateOutline: '#FFFFFF',
+    gateFrame: '#F1F5F9',
+    gateFrameShade: '#94A3B8',
+    warnStripe: '#450A0A',
+    sparkle: '#FDF4FF',
     enemy: '#EF4444',
     enemyHead: '#FCA5A5',
-    // Storm drain greys: grate body, dark slots, rim, and the win cap.
-    drain: '#3F3F46',
-    drainSlot: '#18181B',
-    drainRim: '#71717A',
+    crabClaw: '#DC2626',
+    crabEye: '#FFFFFF',
+    crabPupil: '#292524',
+    pill: '#DC2626',
+    // Storm drain greys: grate body, dark slots, rim, swirl and the win cap.
+    drain: '#26262B',
+    drainSlot: '#0B0B0E',
+    drainRim: '#55555E',
+    drainSwirl: '#8A8A93',
     drainCap: '#A1A1AA',
+    bossBadge: '#B91C1C',
+    bossBadgeRim: '#FECACA',
+    hudTag: '#0F172A',
     coin: '#FBBF24',
     // UI accent for buttons (the yellow flock colour reads poorly there).
     button: '#0D9488',

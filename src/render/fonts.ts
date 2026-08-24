@@ -13,15 +13,21 @@ export interface GameFonts {
 
 const FONT_FAMILY = Platform.select({ ios: 'Helvetica', default: 'sans-serif' });
 
+function heavy(fontSize: number): SkFont {
+  // Heaviest weight the system face offers; falls back to bold where the
+  // family has no black cut.
+  return matchFont({ fontFamily: FONT_FAMILY, fontSize, fontWeight: '900' });
+}
+
 function bold(fontSize: number): SkFont {
   return matchFont({ fontFamily: FONT_FAMILY, fontSize, fontWeight: 'bold' });
 }
 
 export function createGameFonts(): GameFonts {
   return {
-    label: bold(CONFIG.crowd.labelFontSize),
-    gate: bold(CONFIG.gates.textFontSize),
+    label: heavy(CONFIG.crowd.labelFontSize),
+    gate: heavy(CONFIG.gates.textFontSize),
     small: bold(CONFIG.enemies.labelFontSize),
-    boss: bold(CONFIG.boss.numberFontSize),
+    boss: heavy(CONFIG.boss.numberFontSize),
   };
 }

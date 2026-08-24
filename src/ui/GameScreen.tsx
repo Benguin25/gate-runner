@@ -187,6 +187,8 @@ export function GameScreen() {
 const styles = StyleSheet.create({
   fill: {
     flex: 1,
-    backgroundColor: CONFIG.colors.bg,
+    // Matches the top of the in-game sky gradient so there is no colour pop
+    // before the first frame is recorded.
+    backgroundColor: CONFIG.colors.skyTop,
   },
 });
