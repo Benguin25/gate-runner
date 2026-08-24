@@ -6,6 +6,14 @@
 // volume per frame. It is NOT part of the app bundle.
 
 export const PaintStyle = { Fill: 0, Stroke: 1 } as const;
+export const StrokeCap = { Butt: 0, Round: 1, Square: 2 } as const;
+export const StrokeJoin = { Miter: 0, Round: 1, Bevel: 2 } as const;
+export const ClipOp = { Difference: 0, Intersect: 1 } as const;
+export const TileMode = { Clamp: 0, Repeat: 1, Mirror: 2, Decal: 3 } as const;
+
+export function vec(x: number, y: number): { x: number; y: number } {
+  return { x, y };
+}
 
 export interface MockStats {
   paints: number;
@@ -56,6 +64,9 @@ class MockPaint {
   setStrokeWidth(w: number): void {
     this.strokeWidth = w;
   }
+  setStrokeCap(_c: number): void {}
+  setStrokeJoin(_j: number): void {}
+  setShader(_s: unknown): void {}
 }
 
 class MockPath {
@@ -74,6 +85,12 @@ class MockPath {
   }
   addRRect(r: { rect: number[]; rx: number }): void {
     this.commands.push(4, r.rect[0], r.rect[1], r.rect[2], r.rect[3], r.rx);
+  }
+  addCircle(x: number, y: number, r: number): void {
+    this.commands.push(5, x, y, r);
+  }
+  addOval(r: number[]): void {
+    this.commands.push(6, r[0], r[1], r[2], r[3]);
   }
   close(): void {
     this.commands.push(3);
@@ -102,6 +119,10 @@ class MockCanvas {
   drawCircle(x: number, y: number, r: number, p: MockPaint): void {
     draw(x, y, r, p.alpha);
   }
+  drawOval(r: number[], p: MockPaint): void {
+    draw(r[0], r[1], r[2], r[3], p.alpha);
+  }
+  clipRRect(_r: { rect: number[]; rx: number }, _op: number, _aa: boolean): void {}
   drawPath(path: MockPath, p: MockPaint): void {
     draw(path.commands.length, p.alpha);
   }
@@ -133,6 +154,15 @@ export const Skia = {
   Path: { Make: () => new MockPath() },
   XYWHRect: (x: number, y: number, w: number, h: number) => [x, y, w, h],
   RRectXY: (rect: number[], rx: number, ry: number) => ({ rect, rx, ry }),
+  Shader: {
+    MakeLinearGradient: (
+      _start: { x: number; y: number },
+      _end: { x: number; y: number },
+      colors: Float32Array[],
+      _pos: number[] | null,
+      _mode: number
+    ) => ({ colors }),
+  },
 };
 
 export function makeCanvas(): MockCanvas {
@@ -148,3 +178,4 @@ export type SkCanvas = MockCanvas;
 export type SkPaint = MockPaint;
 export type SkPath = MockPath;
 export type SkFont = ReturnType<typeof makeFont>;
+export type SkRect = number[];

@@ -1,9 +1,14 @@
 import {
   PaintStyle,
   Skia,
+  StrokeCap,
+  StrokeJoin,
+  TileMode,
+  vec,
   type SkFont,
   type SkPaint,
   type SkPath,
+  type SkRect,
 } from '@shopify/react-native-skia';
 import { CONFIG } from '../game/config';
 import { lerp } from '../engine/utils';
@@ -22,14 +27,24 @@ export interface LaneGeometry {
   surface: SkPath;
   leftEdge: SkPath;
   rightEdge: SkPath;
+  /** Full-width band from the horizon to the bottom; grass under everything. */
+  grassRect: SkRect;
+  /** Pond strip hugging the left screen edge (drawn over grass, under lane). */
+  pond: SkPath;
+  /** Soft light highlight lines just inside each lane edge. */
+  leftHighlight: SkPath;
+  rightHighlight: SkPath;
 }
 
 export class RenderCache {
   private paints = new Map<ColorName, SkPaint>();
+  private strokes = new Map<ColorName, SkPaint>();
   private lane: LaneGeometry | null = null;
   private textWidths = new Map<SkFont, Map<string, number>>();
   private slots: SkPath | null = null;
+  private swirl: SkPath | null = null;
   private scratch: SkPath | null = null;
+  private sky: { w: number; h: number; paint: SkPaint } | null = null;
   /** Stroke paint for the lane edges. */
   readonly edgePaint: SkPaint;
 
@@ -52,6 +67,43 @@ export class RenderCache {
       this.paints.set(name, p);
     }
     return p;
+  }
+
+  /**
+   * Reusable stroke paint for a config colour (rounded joins so outlined
+   * text stays chunky, not spiky). Callers set the width and alpha they
+   * need and must reset alpha to 1 when done, like paint().
+   */
+  strokePaint(name: ColorName): SkPaint {
+    let p = this.strokes.get(name);
+    if (!p) {
+      p = Skia.Paint();
+      p.setColor(Skia.Color(CONFIG.colors[name]));
+      p.setStyle(PaintStyle.Stroke);
+      p.setStrokeJoin(StrokeJoin.Round);
+      p.setStrokeCap(StrokeCap.Round);
+      this.strokes.set(name, p);
+    }
+    return p;
+  }
+
+  /** Sky gradient paint (light blue to warm horizon), rebuilt on resize. */
+  skyPaint(w: number, h: number): SkPaint {
+    if (this.sky && this.sky.w === w && this.sky.h === h) {
+      return this.sky.paint;
+    }
+    const paint = Skia.Paint();
+    paint.setShader(
+      Skia.Shader.MakeLinearGradient(
+        vec(0, 0),
+        vec(0, h * CONFIG.lane.horizonYFrac * CONFIG.visual.skyBandFrac),
+        [Skia.Color(CONFIG.colors.skyTop), Skia.Color(CONFIG.colors.skyHorizon)],
+        null,
+        TileMode.Clamp
+      )
+    );
+    this.sky = { w, h, paint };
+    return paint;
   }
 
   /** Static lane surface and edge paths, rebuilt only on canvas resize. */
@@ -82,8 +134,73 @@ export class RenderCache {
     rightEdge.moveTo(cx + halfBottom, h);
     rightEdge.lineTo(cx + halfTop, horizonY);
 
-    this.lane = { w, h, surface, leftEdge, rightEdge };
+    const grassRect = Skia.XYWHRect(0, horizonY, w, h - horizonY);
+
+    // Pond quad along the left screen edge, narrowing toward the horizon.
+    // The lane surface draws over it, so only the upper-left sliver shows.
+    const V = CONFIG.visual;
+    const pond = Skia.Path.Make();
+    pond.moveTo(0, h);
+    pond.lineTo(w * V.pondBottomWidthFrac, h);
+    pond.lineTo(w * V.pondTopWidthFrac, horizonY);
+    pond.lineTo(0, horizonY);
+    pond.close();
+
+    // Soft light lines just inside each lane edge; the inset shrinks toward
+    // the horizon with the fake perspective.
+    const inset = V.edgeHighlightInsetPx;
+    const topInset = inset * CONFIG.lane.minScale;
+    const leftHighlight = Skia.Path.Make();
+    leftHighlight.moveTo(cx - halfBottom + inset, h);
+    leftHighlight.lineTo(cx - halfTop + topInset, horizonY);
+    const rightHighlight = Skia.Path.Make();
+    rightHighlight.moveTo(cx + halfBottom - inset, h);
+    rightHighlight.lineTo(cx + halfTop - topInset, horizonY);
+
+    this.lane = {
+      w,
+      h,
+      surface,
+      leftEdge,
+      rightEdge,
+      grassRect,
+      pond,
+      leftHighlight,
+      rightHighlight,
+    };
     return this.lane;
+  }
+
+  /**
+   * Slow inward swirl inside the drain: a couple of spiral arms in
+   * drain-local units, rotated per frame by the caller. Built once.
+   */
+  swirlPath(): SkPath {
+    if (this.swirl) {
+      return this.swirl;
+    }
+    const B = CONFIG.boss;
+    const V = CONFIG.visual;
+    const R = B.bodyRadiusPx * (1 - B.rimFrac);
+    const swirl = Skia.Path.Make();
+    const steps = 36;
+    for (let arm = 0; arm < V.swirlArms; arm++) {
+      const offset = (arm / V.swirlArms) * Math.PI * 2;
+      for (let t = 0; t <= steps; t++) {
+        const f = t / steps;
+        const theta = offset + f * V.swirlTurns * Math.PI * 2;
+        const r = lerp(R * 0.85, R * 0.08, f);
+        const x = Math.cos(theta) * r;
+        const y = Math.sin(theta) * r;
+        if (t === 0) {
+          swirl.moveTo(x, y);
+        } else {
+          swirl.lineTo(x, y);
+        }
+      }
+    }
+    this.swirl = swirl;
+    return swirl;
   }
 
   /**
